@@ -84,6 +84,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/torrents/{id}/pause", post(torrent::pause))
         .route("/api/torrents/{id}/resume", post(torrent::resume))
         .route("/api/torrents/{id}/files", axum::routing::put(torrent::put_files))
+        .route("/api/torrents/{id}/open", post(torrent::open_folder))
         .route("/api/torrents/{id}/play", get(play::play))
         .route("/api/torrents/{id}/playinfo", get(play::playinfo))
         .route("/api/torrents/{id}/file/{index}", get(play::file))

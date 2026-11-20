@@ -205,7 +205,7 @@ export class ApiError extends Error {
 }
 
 /** Every call carries the UI language, so TMDB titles, overviews, episodes and genres come back in it. */
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const lang = `lang=${localeOf(getLang())}`
   let res: Response
   try {

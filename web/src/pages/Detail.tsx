@@ -16,6 +16,7 @@ import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
 const TrailerModal = lazy(() => import('../components/TrailerModal'))
+const DownloadDialog = lazy(() => import('../components/DownloadDialog'))
 
 export default function Detail() {
   const { type, id: idRaw } = useParams()
@@ -23,6 +24,7 @@ export default function Detail() {
   const valid = isMediaType(type) && Number.isInteger(id) && id > 0
   const [params, setParams] = useSearchParams()
   const [trailer, setTrailer] = useState(false)
+  const [download, setDownload] = useState(false)
   const { t } = useI18n()
 
   const q = useQuery({
@@ -113,6 +115,10 @@ export default function Detail() {
               </button>
             )}
             <SaveButton item={d} />
+            <button type="button" className="btn btn-glass btn-lg" onClick={() => setDownload(true)}>
+              <Icon name="download" size={18} />
+              {d.type === 'tv' && season !== undefined ? t('dl.seasonButton', { n: season }) : t('tor.download')}
+            </button>
           </div>
           {d.overview ? (
             <p className="detail-overview">{d.overview}</p>
@@ -173,6 +179,12 @@ export default function Detail() {
             <PosterCard key={`${r.type}-${r.id}`} item={r} />
           ))}
         </Row>
+      )}
+
+      {download && (
+        <Suspense fallback={null}>
+          <DownloadDialog d={d} season={season} onClose={() => setDownload(false)} />
+        </Suspense>
       )}
 
       {trailer && d.trailer_youtube_key && (

@@ -1,8 +1,30 @@
+import { useState } from 'react'
+import { Link } from 'react-router'
 import { useI18n, type Key, type T } from '../../i18n'
 import type { AudioLang, Filter, MinHeight, Scan, ScanResult, Settings, SortKey } from '../../lib/api'
 import { formatBitrate, formatHeight, formatMs, langCode } from '../../lib/format'
 import { fit, rank } from '../../lib/pick'
+import type { TorrentResult, Vpn } from '../../lib/torrents'
 import Icon from '../Icon'
+import { TorrentRow, VpnBadge, VpnNotice } from '../Torrents'
+
+/** The torrent group under the provider list. */
+export type TorrentGroup = {
+  results: TorrentResult[]
+  loading: boolean
+  error: unknown
+  vpn: Vpn | undefined
+  /** Infohash that plays right now. */
+  active: string | null
+  /** Infohash the automatic choice prefers over every provider. */
+  best: string | null
+  /** Infohashes already in the download list. */
+  listed: ReadonlySet<string>
+  onPlay: (r: TorrentResult) => void
+  onDownload: (r: TorrentResult) => void
+  downloading: string | null
+  downloadError: unknown
+}
 
 type Props = {
   sniffer: boolean
@@ -18,7 +40,10 @@ type Props = {
   onPick: (providerId: string) => void
   onAuto: () => void
   onRescan: () => void
+  torrents: TorrentGroup
 }
+
+const TORRENTS_SHOWN = 6
 
 const heights = (t: T): { value: MinHeight; label: string }[] => [
   { value: 0, label: t('scan.any') },
@@ -253,6 +278,70 @@ export default function ScanPanel(p: Props) {
           </ul>
         </details>
       )}
+
+      <TorrentSection g={p.torrents} filter={filter} />
     </aside>
+  )
+}
+
+function TorrentSection({ g, filter }: { g: TorrentGroup; filter: Filter }) {
+  const { t } = useI18n()
+  const [all, setAll] = useState(false)
+  const shown = all ? g.results : g.results.slice(0, TORRENTS_SHOWN)
+  const hidden = g.results.length - shown.length
+  const anyListed = g.results.some((r) => g.listed.has(r.infohash))
+  let state = t('tor.searching')
+  if (!g.loading) state = g.error ? t('tor.searchFailedShort') : t('tor.count', { n: g.results.length })
+  return (
+    <section className="tgroup" aria-labelledby="tgroup-title">
+      <header className="tgroup-head">
+        <h3 className="tgroup-title" id="tgroup-title">
+          {t('tor.group')}
+        </h3>
+        <p className={`scan-state${g.loading ? ' is-running' : ''}`}>
+          {g.loading && <span className="bars" aria-hidden="true" />}
+          {state}
+        </p>
+        <VpnBadge vpn={g.vpn} />
+      </header>
+      <VpnNotice vpn={g.vpn} compact />
+      {g.loading ? null : g.error ? (
+        <p className="scan-empty">{t('tor.searchFailed')}</p>
+      ) : g.results.length === 0 ? (
+        <p className="scan-empty">{t('tor.none')}</p>
+      ) : (
+        <ol className="scan-list tlist">
+          {shown.map((r) => (
+            <TorrentRow
+              key={r.infohash}
+              r={r}
+              filter={filter}
+              active={r.infohash === g.active}
+              best={r.infohash === g.best}
+              inList={g.listed.has(r.infohash) || g.downloading === r.infohash}
+              onPlay={() => g.onPlay(r)}
+              onDownload={() => g.onDownload(r)}
+            />
+          ))}
+        </ol>
+      )}
+      {hidden > 0 && (
+        <button type="button" className="tgroup-more" onClick={() => setAll(true)}>
+          {t('tor.more', { n: hidden })}
+          <Icon name="down" size={14} />
+        </button>
+      )}
+      {!!g.downloadError && (
+        <p className="field-error" role="alert">
+          {t('tor.downloadFailed')}
+        </p>
+      )}
+      {anyListed && (
+        <Link to="/downloads" className="tgroup-link">
+          <Icon name="download" size={15} />
+          {t('tor.toDownloads')}
+        </Link>
+      )}
+    </section>
   )
 }

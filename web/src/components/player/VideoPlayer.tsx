@@ -14,6 +14,7 @@ import { api, streamUrl, type Variant } from '../../lib/api'
 import { getLang, t as i18nT, useI18n, type Key, type T } from '../../i18n'
 import { formatBitrate, formatClock, formatHeight, langCode, trackLabel } from '../../lib/format'
 import { variantIndex } from '../../lib/pick'
+import { playUrl, type AudioInfo } from '../../lib/torrents'
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
 import Icon, { type IconName } from '../Icon'
 import { Flicker } from '../States'
@@ -39,6 +40,23 @@ type Props = {
   onHintDone?: () => void
   /** One-click way out when this source fails, e.g. "Andere Quelle". */
   fallback?: { label: string; run: () => void }
+  /** Plays a torrent file instead of a provider stream (`streamId` is then only the component's identity). */
+  torrent?: TorrentSource
+}
+
+/**
+ * A torrent file as /playinfo describes it. "direct": the file itself, seekable natively. "transcode": ffmpeg fMP4,
+ * not seekable; the player reloads `play?t=` on a seek and adds that offset to the element's clock.
+ */
+export type TorrentSource = {
+  id: string
+  file: number
+  mode: 'direct' | 'transcode'
+  duration: number | null
+  copyVideo: boolean
+  audio: AudioInfo[]
+  /** Calm state line for the bar, e.g. "Lädt von 34 Quellen · 12 MB/s". */
+  status?: string
 }
 
 type Option = { id: number; label: string; hint?: string }
@@ -127,6 +145,7 @@ export default function VideoPlayer({
   resumeHint,
   onHintDone,
   fallback,
+  torrent,
 }: Props) {
   const wrap = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
@@ -167,6 +186,35 @@ export default function VideoPlayer({
   // Latest callbacks/props for the long-lived listeners below.
   const live = useRef({ onTime, onExpired, onSave, variants, startAt })
   live.current = { onTime, onExpired, onSave, variants, startAt: live.current.startAt }
+
+  // ---- torrent playback: absolute time = start of the current ffmpeg stream + the element's own clock ----
+  const tor = useRef(torrent)
+  tor.current = torrent
+  const offset = useRef(0)
+  const tState = useRef<{ mode: 'direct' | 'transcode'; audio: number | null; h264: boolean }>({
+    mode: torrent?.mode ?? 'direct',
+    audio: null,
+    h264: false,
+  })
+  const pendingSeek = useRef<number | null>(null)
+  const seekTimer = useRef<number | undefined>(undefined)
+  /** Position in the whole video, also while a transcoded seek is still loading. */
+  const nowAt = useCallback(() => pendingSeek.current ?? offset.current + (video.current?.currentTime ?? 0), [])
+  const isTranscode = () => !!tor.current && tState.current.mode === 'transcode'
+  /** (Re)loads the torrent stream at `at` seconds; keeps playing if it was playing. */
+  const loadTorrent = useCallback((at: number, autoplay?: boolean) => {
+    const el = video.current
+    const src = tor.current
+    if (!el || !src) return
+    const s = tState.current
+    const direct = s.mode === 'direct'
+    const play = autoplay ?? (!el.paused && !el.ended)
+    offset.current = direct ? 0 : Math.max(0, at)
+    el.src = playUrl(src.id, src.file, direct ? {} : { t: at, audio: s.audio, h264: s.h264 })
+    if (direct && at > 0) el.addEventListener('loadedmetadata', () => (el.currentTime = at), { once: true })
+    if (play) void el.play().catch(() => undefined)
+    setTime(at)
+  }, [])
 
   // ---- progress saving: only once playback really ran, from the last known position ----
   const pos = useRef({ time: startAt, duration: 0, played: false })
@@ -231,8 +279,34 @@ export default function VideoPlayer({
   useEffect(() => {
     const el = video.current
     if (!el) return
-    const url = streamUrl(streamId)
     const from = live.current.startAt
+    const src = tor.current
+    if (src) {
+      tState.current = { mode: src.mode, audio: null, h264: false }
+      setAudios(src.audio.map((a) => ({ id: a.index, lang: a.lang, name: a.title })))
+      setAudio(src.audio.find((a) => a.default)?.index ?? src.audio[0]?.index ?? -1)
+      const onTorrentError = () => {
+        const s = tState.current
+        const code = el.error?.code
+        // Video the browser cannot decode (e.g. HEVC without the system extension): let ffmpeg make H.264 of it.
+        if (!s.h264 && src.copyVideo && (code === MediaError.MEDIA_ERR_DECODE || code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED)) {
+          s.h264 = true
+          s.mode = 'transcode'
+          loadTorrent(nowAt(), true)
+          return
+        }
+        setFatal('vp.cantPlay')
+      }
+      el.addEventListener('error', onTorrentError)
+      loadTorrent(from, true)
+      return () => {
+        el.removeEventListener('error', onTorrentError)
+        window.clearTimeout(seekTimer.current)
+        el.removeAttribute('src')
+        el.load()
+      }
+    }
+    const url = streamUrl(streamId)
     let hls: Hls | null = null
     let mediaRecoveries = 0
     let networkRetries = 0
@@ -341,7 +415,8 @@ export default function VideoPlayer({
     if (!el) return
     const ranges = () => {
       const out: [number, number][] = []
-      for (let i = 0; i < el.buffered.length; i += 1) out.push([el.buffered.start(i), el.buffered.end(i)])
+      const o = offset.current
+      for (let i = 0; i < el.buffered.length; i += 1) out.push([o + el.buffered.start(i), o + el.buffered.end(i)])
       setBuffered(out)
     }
     const on: [keyof HTMLMediaElementEventMap, () => void][] = [
@@ -361,19 +436,23 @@ export default function VideoPlayer({
           })
         },
       ],
-      ['seeked', () => (prefetchRef.current(), (pos.current.time = el.currentTime), save())],
+      ['seeked', () => (prefetchRef.current(), (pos.current.time = offset.current + el.currentTime), save())],
       [
         'timeupdate',
         () => {
-          setTime(el.currentTime)
-          live.current.onTime(el.currentTime)
-          if (pos.current.played) pos.current.time = el.currentTime
+          if (pendingSeek.current !== null) return
+          const now = offset.current + el.currentTime
+          setTime(now)
+          live.current.onTime(now)
+          if (pos.current.played) pos.current.time = now
         },
       ],
       [
         'durationchange',
         () => {
-          const d = Number.isFinite(el.duration) ? el.duration : 0
+          // A transcoded torrent is a live-like fMP4 without a length: the timeline comes from ffprobe.
+          const known = tor.current?.duration ?? 0
+          const d = tor.current && tState.current.mode === 'transcode' ? known : Number.isFinite(el.duration) ? el.duration : known
           setDuration(d)
           pos.current.duration = d
         },
@@ -464,12 +543,31 @@ export default function VideoPlayer({
     if (el.paused || el.ended) void el.play().catch(() => undefined)
     else el.pause()
   }, [])
-  const seekTo = useCallback((seconds: number) => {
-    const el = video.current
-    if (!el || !Number.isFinite(el.duration)) return
-    el.currentTime = clamp(seconds, 0, Math.max(0, el.duration - 0.5))
-    setTime(el.currentTime)
-  }, [])
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const el = video.current
+      if (!el) return
+      if (isTranscode()) {
+        // Not seekable in place: restart ffmpeg at the new spot (debounced, so held arrow keys load once).
+        const d = tor.current?.duration ?? 0
+        if (d <= 0) return
+        const at = clamp(seconds, 0, Math.max(0, d - 1))
+        pendingSeek.current = at
+        pos.current.time = at
+        setTime(at)
+        window.clearTimeout(seekTimer.current)
+        seekTimer.current = window.setTimeout(() => {
+          pendingSeek.current = null
+          loadTorrent(at)
+        }, 250)
+        return
+      }
+      if (!Number.isFinite(el.duration)) return
+      el.currentTime = clamp(seconds, 0, Math.max(0, el.duration - 0.5))
+      setTime(el.currentTime)
+    },
+    [loadTorrent],
+  )
   const toggleMute = useCallback(() => setVol((v) => ({ ...v, muted: !v.muted && v.volume > 0 })), [])
   const nudgeVolume = useCallback(
     (delta: number) => setVol((v) => ({ volume: clamp(Math.round((v.volume + delta) * 20) / 20, 0, 1), muted: false })),
@@ -536,11 +634,11 @@ export default function VideoPlayer({
           break
         case 'ArrowLeft':
           e.preventDefault()
-          if (el) seekTo(el.currentTime - 10)
+          if (el) seekTo(nowAt() - 10)
           break
         case 'ArrowRight':
           e.preventDefault()
-          if (el) seekTo(el.currentTime + 10)
+          if (el) seekTo(nowAt() + 10)
           break
         case 'ArrowUp':
           if (!inside && !document.fullscreenElement) return
@@ -576,7 +674,7 @@ export default function VideoPlayer({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggle, seekTo, nudgeVolume, toggleFullscreen, toggleMute, toggleSubs, poke])
+  }, [toggle, seekTo, nowAt, nudgeVolume, toggleFullscreen, toggleMute, toggleSubs, poke])
 
   // Single click pauses, double click goes fullscreen; wait a moment so a double click does not also pause.
   const clickTimer = useRef<number | undefined>(undefined)
@@ -637,9 +735,20 @@ export default function VideoPlayer({
     setMenu(null)
   }
   const pickAudio = (id: number) => {
+    setMenu(null)
+    const src = tor.current
+    if (src) {
+      // Another track means ffmpeg; the file's first track plays directly again where that is possible.
+      const s = tState.current
+      const at = nowAt()
+      s.audio = id
+      if (src.mode === 'direct') s.mode = id === 0 && !s.h264 ? 'direct' : 'transcode'
+      setAudio(id)
+      loadTorrent(at)
+      return
+    }
     const hls = hlsRef.current
     if (hls) hls.audioTrack = id
-    setMenu(null)
   }
 
   // ---- seek bar ----
@@ -742,6 +851,7 @@ export default function VideoPlayer({
       {(waiting || !started) && !fatal && !ended && (
         <div className="vp-center" aria-hidden={started}>
           <Flicker size={52} label={started ? undefined : t('vp.loading')} />
+          {torrent?.status && <p className="vp-center-status">{torrent.status}</p>}
         </div>
       )}
 
@@ -956,6 +1066,12 @@ export default function VideoPlayer({
             <p className="vp-ahead" title={t('vp.aheadTitle')}>
               <span className="vp-ahead-dot" />
               {t(ahead.done ? 'vp.prefetched' : 'vp.prefetching', { n: Math.max(1, Math.round(ahead.ahead_seconds / 60)) })}
+            </p>
+          )}
+          {torrent?.status && (
+            <p className="vp-ahead vp-peers" role="status">
+              <span className="vp-ahead-dot" />
+              {torrent.status}
             </p>
           )}
 

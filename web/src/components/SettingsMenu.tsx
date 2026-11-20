@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { Link } from 'react-router'
 import { LANGUAGES, useI18n } from '../i18n'
+import { useTorrents } from '../lib/torrents'
 import Icon from './Icon'
+import { VpnBadge, VpnNotice } from './Torrents'
 
 /** Settings in the header: a small button with the current language code that opens the panel. */
 export default function SettingsMenu() {
@@ -86,8 +89,37 @@ export default function SettingsMenu() {
             ))}
           </div>
           <p className="field-hint">{t('settings.languageHint')}</p>
+          <DownloadsSection onNavigate={() => setOpen(false)} />
         </div>
       )}
     </div>
+  )
+}
+
+/** "Downloads & VPN": tunnel state and whether the WireGuard file is there; the form lives on the Downloads page. */
+function DownloadsSection({ onNavigate }: { onNavigate: () => void }) {
+  const { t } = useI18n()
+  const vpn = useTorrents().data?.vpn
+  return (
+    <section className="settings-section" aria-labelledby="settings-dl">
+      <h3 className="field-label" id="settings-dl">
+        {t('set.section')}
+      </h3>
+      <p className="settings-vpn">
+        <VpnBadge vpn={vpn} always />
+        {vpn && (
+          <span className={`set-found${vpn.config_found ? ' is-ok' : ' is-bad'}`}>
+            <Icon name={vpn.config_found ? 'check' : 'warn'} size={13} stroke={2.2} />
+            {vpn.config_found ? t('set.fileOk') : t('set.fileMissing')}
+          </span>
+        )}
+      </p>
+      <VpnNotice vpn={vpn} compact noLink />
+      <Link to="/downloads?tab=einstellungen" className="settings-link" onClick={onNavigate}>
+        <Icon name="folder" size={15} />
+        {t('set.open')}
+        <Icon name="right" size={14} />
+      </Link>
+    </section>
   )
 }

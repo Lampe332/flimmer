@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import EpisodeList from '../components/EpisodeList'
 import Icon from '../components/Icon'
 import ScanPanel from '../components/player/ScanPanel'
+import TorrentStage from '../components/player/TorrentStage'
 import VideoPlayer from '../components/player/VideoPlayer'
 import SeasonTabs from '../components/SeasonTabs'
 import { ErrorState, Flicker, PageLoader } from '../components/States'
@@ -20,7 +21,17 @@ import {
 } from '../lib/api'
 import { useI18n } from '../i18n'
 import { formatDate, formatHeight, isUpcoming } from '../lib/format'
-import { rank } from '../lib/pick'
+import { rank, torrentBeatsProvider } from '../lib/pick'
+import {
+  rankTorrents,
+  refreshTorrents,
+  torrentApi,
+  torrentHasLang,
+  useTorrents,
+  type StartBody,
+  type TorrentMedia,
+  type TorrentResult,
+} from '../lib/torrents'
 import { invalidateWatching, neighbour, resumeTarget, useProgress, type Ep } from '../lib/progress'
 import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
@@ -40,6 +51,20 @@ export default function Player() {
   const s =Math.max(0, Math.floor(Number(params.get('s'))) || 1)
   const e = Math.max(1, Math.floor(Number(params.get('e'))) || 1)
   return <PlayerView key={`${type}-${id}-${s}-${e}`} type={type} id={id} s={s} e={e} />
+}
+
+/** "Play via torrent" in the stage card when no provider stream is there. */
+function TorrentStart({ r, onPlay }: { r: TorrentResult; onPlay: () => void }) {
+  const { t } = useI18n()
+  return (
+    <button type="button" className="btn btn-primary" onClick={onPlay}>
+      <Icon name="play" size={16} />
+      {t('tor.playBest')}
+      <span className="btn-note">
+        {[formatHeight(r.release.height), t('tor.seedsShort', { n: r.seeders })].filter(Boolean).join(' · ')}
+      </span>
+    </button>
+  )
 }
 
 /** `/play/tv/:id` without an episode: continue where you left off, else start with the first episode. */
@@ -130,6 +155,38 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const chosen = manual ?? locked
   const active = chosen ? results.find((r) => r.provider_id === chosen && r.status === 'ok' && r.stream_id) : undefined
 
+  // ---- torrents: searched in parallel with the scan, a second group in the panel ----
+  const torQ = useQuery({
+    queryKey: ['torrents-for', type, id, s, e],
+    queryFn: () => torrentApi.forTitle(type, id, s, e),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  const torList = useTorrents()
+  const vpn = torList.data?.vpn
+  const torrents = useMemo(
+    () => rankTorrents(torQ.data?.results ?? [], settings.filter).filter((r) => !dead.has(`t:${r.infohash}`)),
+    [torQ.data, settings.filter, dead],
+  )
+  const bestTorrent = torrents[0]
+  const activeTorrent = chosen?.startsWith('t:') ? torrents.find((r) => `t:${r.infohash}` === chosen) : undefined
+  const activeKey = active?.provider_id ?? (activeTorrent ? chosen : undefined)
+  // The rule itself lives in lib/pick.ts (torrentBeatsProvider): providers first, a torrent only when it clearly wins.
+  const torrentWins =
+    vpn?.config_found !== false &&
+    torrentBeatsProvider(
+      best,
+      bestTorrent && {
+        height: bestTorrent.release.height,
+        seeders: bestTorrent.seeders,
+        belowMin: bestTorrent.below_min,
+        cam: bestTorrent.release.source === 'CAM',
+        hasLang: torrentHasLang(bestTorrent.release, settings.filter.audio_lang),
+      },
+      settings.filter,
+    )
+  const autoId = torrentWins && bestTorrent ? `t:${bestTorrent.infohash}` : best?.provider_id
+
   // Automatic choice: start quickly with the best result so far (after 8 s of scanning or when the scan is done),
   // then upgrade automatically while the scan is still running if a better one arrives. Manual choice always wins.
   const [early, setEarly] = useState(false)
@@ -143,16 +200,17 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
     return () => (clearTimeout(t), clearInterval(tick))
   }, [running, scanKey])
   useEffect(() => {
+    if (manual?.startsWith('t:') && activeTorrent) return
     if (!settled && !early) return
-    if (chosen && !active) {
+    if (chosen && !activeKey) {
       setManual(null)
       setLocked(null)
-    } else if (!chosen && best) {
-      setLocked(best.provider_id)
-    } else if (!manual && running && best && locked && best.provider_id !== locked) {
-      setLocked(best.provider_id)
+    } else if (!chosen && autoId) {
+      setLocked(autoId)
+    } else if (!manual && running && autoId && locked && autoId !== locked) {
+      setLocked(autoId)
     }
-  }, [settled, early, running, chosen, active, best, manual, locked])
+  }, [settled, early, running, chosen, activeKey, activeTorrent, autoId, manual, locked])
 
   const onSettings = (next: Settings) => {
     setDraft(next)
@@ -162,13 +220,35 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
 
   // The playing source broke for good: drop it, the automatic choice then takes the next best one.
   const onFailed = () => {
-    const provider = active?.provider_id
-    if (!provider) return
-    setDead((old) => new Set(old).add(provider))
+    const key = activeKey
+    if (!key) return
+    setDead((old) => new Set(old).add(key))
     setManual(null)
     setLocked(null)
   }
   const others = ranked.filter((r) => r.provider_id !== active?.provider_id).length
+
+  const media = (r: TorrentResult): TorrentMedia => ({
+    type,
+    id,
+    title: d?.title ?? r.release.title,
+    year: d?.year ?? undefined,
+    season: isTv ? s : undefined,
+    episode: isTv ? e : undefined,
+  })
+  const startBody = (r: TorrentResult, mode: 'stream' | 'download'): StartBody => ({
+    magnet: r.magnet,
+    trackers: r.trackers,
+    name: r.name,
+    mode,
+    file_index: r.file_index ?? undefined,
+    media: media(r),
+  })
+  const download = useMutation({
+    mutationFn: (r: TorrentResult) => torrentApi.start(startBody(r, 'download')),
+    onSuccess: () => refreshTorrents(qc),
+  })
+  const listed = new Set(torList.data?.torrents.filter((x) => x.mode === 'download').map((x) => x.id) ?? [])
   const fallback =
     others > 0
       ? { label: t('player.otherSource'), run: onFailed }
@@ -266,8 +346,34 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
             </p>
           )}
 
-          <div className={`stage${active ? ' has-video' : ''}`}>
-            {active?.stream_id && progressReady ? (
+          <div className={`stage${active || activeTorrent ? ' has-video' : ''}`}>
+            {activeTorrent && progressReady ? (
+              <TorrentStage
+                key={activeTorrent.infohash}
+                hash={activeTorrent.infohash}
+                startBody={startBody(activeTorrent, 'stream')}
+                file={activeTorrent.file_index ?? undefined}
+                title={d?.title ?? activeTorrent.release.title}
+                subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
+                startAt={resume.current || savedStart}
+                onTime={(t) => (resume.current = t)}
+                onSave={onSave}
+                resumeHint={!hintDone && savedStart > 0 ? savedStart : undefined}
+                onHintDone={() => setHintDone(true)}
+                fallback={{ label: t('player.otherSource'), run: onFailed }}
+                backdrop={d?.backdrop}
+                next={
+                  nextPlayable
+                    ? {
+                        label: t('player.episodeLabel', { s: nextPlayable.s, e: nextPlayable.e }),
+                        name: nextEp?.name,
+                        still: nextEp?.still,
+                        go: () => go(nextPlayable),
+                      }
+                    : undefined
+                }
+              />
+            ) : active?.stream_id && progressReady ? (
               <VideoPlayer
                 key={active.stream_id}
                 streamId={active.stream_id}
@@ -339,11 +445,15 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                         <Icon name="app" size={26} />
                       </span>
                       <h2>{t('player.appOnly')}</h2>
-                      <p>{t('player.appOnlyText')}</p>
-                      <Link to={titlePath({ type, id })} className="btn btn-glass">
-                        <Icon name="left" size={16} />
-                        {t('player.backToTitle')}
-                      </Link>
+                      <p>{bestTorrent ? t('tor.browserText') : t('player.appOnlyText')}</p>
+                      {bestTorrent ? (
+                        <TorrentStart r={bestTorrent} onPlay={() => setManual(`t:${bestTorrent.infohash}`)} />
+                      ) : (
+                        <Link to={titlePath({ type, id })} className="btn btn-glass">
+                          <Icon name="left" size={16} />
+                          {t('player.backToTitle')}
+                        </Link>
+                      )}
                     </>
                   ) : (
                     <>
@@ -352,7 +462,12 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       </span>
                       <h2>{t('player.none')}</h2>
                       <p>{results.length > 0 ? t('player.noneText') : t('player.noProviders')}</p>
-                      <button type="button" className="btn btn-primary" onClick={() => startScan({ force: true })}>
+                      {bestTorrent && <TorrentStart r={bestTorrent} onPlay={() => setManual(`t:${bestTorrent.infohash}`)} />}
+                      <button
+                        type="button"
+                        className={`btn ${bestTorrent ? 'btn-glass' : 'btn-primary'}`}
+                        onClick={() => startScan({ force: true })}
+                      >
                         <Icon name="refresh" size={16} />
                         {t('player.searchAgain')}
                       </button>
@@ -408,6 +523,19 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
           onPick={setManual}
           onAuto={() => (setManual(null), setLocked(null))}
           onRescan={() => (setManual(null), setLocked(null), startScan({ force: true }))}
+          torrents={{
+            results: torrents,
+            loading: torQ.isPending,
+            error: torQ.error,
+            vpn,
+            active: activeTorrent?.infohash ?? null,
+            best: torrentWins ? (bestTorrent?.infohash ?? null) : null,
+            listed,
+            onPlay: (r) => setManual(`t:${r.infohash}`),
+            onDownload: (r) => download.mutate(r),
+            downloading: download.isPending ? (download.variables?.infohash ?? null) : null,
+            downloadError: download.error,
+          }}
         />
       </div>
 

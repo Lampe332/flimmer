@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useI18n, type Key } from '../i18n'
 import { useNewEpisodes } from '../lib/progress'
+import { isActive, useTorrents } from '../lib/torrents'
 import Icon, { type IconName } from './Icon'
 import Logo from './Logo'
 import SettingsMenu from './SettingsMenu'
+import { HeaderVpn } from './Torrents'
 
 const NAV: { to: string; label: Key; end: boolean; icon: IconName }[] = [
   { to: '/', label: 'nav.home', end: true, icon: 'home' },
@@ -12,18 +14,20 @@ const NAV: { to: string; label: Key; end: boolean; icon: IconName }[] = [
   { to: '/serien', label: 'nav.tv', end: false, icon: 'tv' },
   { to: '/merkliste', label: 'nav.watchlist', end: false, icon: 'bookmark' },
   { to: '/verlauf', label: 'nav.history', end: false, icon: 'clock' },
+  { to: '/downloads', label: 'nav.downloads', end: false, icon: 'download' },
 ]
 
-/** Series with new episodes, shown on the history entry. */
-function Badge({ to, count }: { to: string; count: number }) {
+/** Series with new episodes on the history entry, running downloads on the downloads entry. */
+function Badge({ to, fresh, loading }: { to: string; fresh: number; loading: number }) {
   const { t } = useI18n()
-  if (to !== '/verlauf' || count === 0) return null
+  const count = to === '/verlauf' ? fresh : to === '/downloads' ? loading : 0
+  if (count === 0) return null
   return (
     <>
-      <span className="nav-badge" aria-hidden="true">
+      <span className={`nav-badge${to === '/downloads' ? ' is-live' : ''}`} aria-hidden="true">
         {count > 9 ? '9+' : count}
       </span>
-      <span className="sr-only">{t('nav.newBadge', { n: count })}</span>
+      <span className="sr-only">{to === '/verlauf' ? t('nav.newBadge', { n: count }) : t('nav.loadingBadge', { n: count })}</span>
     </>
   )
 }
@@ -51,6 +55,7 @@ export default function Header() {
   const typed = useRef(false)
   const scrolled = useScrolled()
   const fresh = useNewEpisodes().data?.length ?? 0
+  const loading = useTorrents().data?.torrents.filter(isActive).length ?? 0
   const { t } = useI18n()
 
   // Keep field in sync when the URL changes (back/forward, leaving search).
@@ -94,7 +99,7 @@ export default function Header() {
             {NAV.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
                 {t(n.label)}
-                <Badge to={n.to} count={fresh} />
+                <Badge to={n.to} fresh={fresh} loading={loading} />
               </NavLink>
             ))}
           </nav>
@@ -127,6 +132,7 @@ export default function Header() {
               /
             </kbd>
           </form>
+          <HeaderVpn />
           <SettingsMenu />
         </div>
       </header>
@@ -136,7 +142,7 @@ export default function Header() {
           <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link">
             <span className="tabbar-icon">
               <Icon name={n.icon} size={22} />
-              <Badge to={n.to} count={fresh} />
+              <Badge to={n.to} fresh={fresh} loading={loading} />
             </span>
             <span>{t(n.label)}</span>
           </NavLink>

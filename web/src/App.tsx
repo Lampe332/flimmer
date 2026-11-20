@@ -14,6 +14,8 @@ const Player = lazy(() => import('./pages/Player'))
 const Watchlist = lazy(() => import('./pages/Watchlist'))
 const History = lazy(() => import('./pages/History'))
 const NotFound = lazy(() => import('./pages/NotFound'))
+const Downloads = lazy(() => import('./pages/Downloads'))
+const TorrentPlay = lazy(() => import('./pages/TorrentPlay'))
 
 /** Scroll position per history entry, so "back" lands where you left the page. */
 const positions = new Map<string, number>()
@@ -74,7 +76,9 @@ export default function App() {
             <Route path="/serien" element={<Browse type="tv" />} />
             <Route path="/suche" element={<Search />} />
             <Route path="/titel/:type/:id" element={<Detail />} />
+            <Route path="/play/torrent/:hash" element={<TorrentPlay />} />
             <Route path="/play/:type/:id" element={<Player />} />
+            <Route path="/downloads" element={<Downloads />} />
             <Route path="/merkliste" element={<Watchlist />} />
             <Route path="/verlauf" element={<History />} />
             <Route path="*" element={<NotFound />} />

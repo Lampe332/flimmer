@@ -255,6 +255,7 @@ interface TorrentSettings { vpn_config: string; movies_dir: string; series_dir: 
 | POST | `/api/torrents/:id/pause` | `204` |
 | POST | `/api/torrents/:id/resume` | `204` |
 | PUT | `/api/torrents/:id/files` | body `{ files: number[] }` → `204`; changes the selection (season packs) |
+| POST | `/api/torrents/:id/open` | `204`; opens the torrent's folder in Explorer on the PC Flimmer runs on, with the first chosen video selected when it exists. `404` while the folder does not exist yet |
 | DELETE | `/api/torrents/:id?files=1` | `204`; with `files=1` also deletes the torrent's files (and its folders when empty) |
 | GET | `/api/torrents/:id/playinfo?file=<i>` | `PlayInfo` (ffprobe; waits until the file's start is downloaded, `504` after 90 s). `file` defaults to the first selected video |
 | GET | `/api/torrents/:id/play?file=<i>&t=<seconds>&audio=<i>&video=h264` | the playable stream, see below |

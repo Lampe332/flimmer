@@ -29,6 +29,10 @@ export type IconName =
   | 'app'
   | 'clock'
   | 'trash'
+  | 'download'
+  | 'shield'
+  | 'folder'
+  | 'seed'
 
 const paths: Record<IconName, string> = {
   play: 'M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z',
@@ -61,6 +65,10 @@ const paths: Record<IconName, string> = {
   app: 'M3.5 5h17v11h-17zM9 20h6M12 16v4',
   clock: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18ZM12 7.5V12l3 2',
   trash: 'M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5',
+  download: 'M12 4v11M7 10.5l5 5 5-5M5 19.5h14',
+  shield: 'M12 3.5 5 6v5.5c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6ZM9 12l2.2 2.2L15.5 10',
+  folder: 'M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z',
+  seed: 'M12 19V6M7 10.5l5-5 5 5',
 }
 
 const filled: Partial<Record<IconName, true>> = { play: true, pause: true, next: true, star: true }

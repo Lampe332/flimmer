@@ -745,6 +745,42 @@ pub async fn delete(State(st): St, Path(id): Path<String>, Query(q): Params) -> 
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/torrents/:id/open`: shows the torrent's folder in Explorer on the PC Flimmer runs on,
+/// with its first chosen video selected when that file exists.
+pub async fn open_folder(State(st): St, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    let m = st.torrents.entry(&id)?.meta();
+    let folder = PathBuf::from(&m.folder);
+    if m.folder.is_empty() || !folder.is_dir() {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "the folder does not exist yet"));
+    }
+    let video = m
+        .files
+        .iter()
+        .filter(|f| m.selected.contains(&f.index) && is_video(&f.path))
+        .filter(|f| FsPath::new(&f.path).components().all(|c| matches!(c, Component::Normal(_))))
+        .map(|f| folder.join(&f.path))
+        .find(|p| p.is_file());
+    open_in_explorer(&folder, video.as_deref()).map_err(|_| ApiError::internal("cannot open the folder"))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(windows)]
+fn open_in_explorer(folder: &FsPath, select: Option<&FsPath>) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = std::process::Command::new("explorer.exe");
+    // Explorer wants `/select,"path"` as it is; the default quoting would wrap the whole argument.
+    match select {
+        Some(file) => cmd.raw_arg(format!("/select,\"{}\"", file.display())),
+        None => cmd.arg(folder),
+    };
+    cmd.spawn().map(drop)
+}
+
+#[cfg(not(windows))]
+fn open_in_explorer(folder: &FsPath, _select: Option<&FsPath>) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open").arg(folder).spawn().map(drop)
+}
+
 /// `GET /api/torrents/settings`
 pub async fn settings_get(State(st): St) -> ApiResult<Json<TorrentSettings>> {
     load_settings(&st).map(Json)
