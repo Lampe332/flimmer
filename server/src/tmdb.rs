@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::Mutex,
+    sync::{Mutex, RwLock},
     time::{Duration, Instant},
 };
 
@@ -36,7 +36,8 @@ pub fn valid_language(s: &str) -> bool {
 /// The bearer token is only ever placed in the Authorization header.
 pub struct Tmdb {
     http: reqwest::Client,
-    token: String,
+    /// Empty until the first-run setup stored one (`needs_setup`).
+    token: RwLock<String>,
     pub language: String,
     pub region: String,
     cache: Mutex<HashMap<String, (Instant, Value)>>,
@@ -49,7 +50,21 @@ impl Tmdb {
             .timeout(Duration::from_secs(15))
             .build()
             .expect("HTTP client must build");
-        Self { http, token, language, region, cache: Mutex::new(HashMap::new()) }
+        Self { http, token: RwLock::new(token), language, region, cache: Mutex::new(HashMap::new()) }
+    }
+
+    pub fn has_token(&self) -> bool {
+        !self.token.read().expect("token lock").is_empty()
+    }
+
+    /// Swaps the token (first-run setup, settings, reset) and drops everything cached with the old one.
+    pub fn set_token(&self, token: String) {
+        *self.token.write().expect("token lock") = token;
+        self.clear_cache();
+    }
+
+    pub fn clear_cache(&self) {
+        self.cache.lock().expect("cache lock").clear();
     }
 
     /// The request's language (`?lang=`), else `config.language`.
@@ -69,6 +84,10 @@ impl Tmdb {
             query.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join("&")
         );
 
+        let token = self.token.read().expect("token lock").clone();
+        if token.is_empty() {
+            return Err(ApiError::needs_setup());
+        }
         if ttl.is_some()
             && let Some((expires, value)) = self.cache.lock().expect("cache lock").get(&key)
             && *expires > Instant::now()
@@ -79,7 +98,7 @@ impl Tmdb {
         let resp = self
             .http
             .get(format!("{BASE}{path}"))
-            .bearer_auth(&self.token)
+            .bearer_auth(&token)
             .query(&query)
             .send()
             .await
@@ -113,8 +132,32 @@ impl Tmdb {
 
     /// True if the token is accepted by TMDB.
     pub async fn check(&self) -> bool {
-        self.get("/configuration", &[], None).await.is_ok()
+        self.has_token() && self.get("/configuration", &[], None).await.is_ok()
     }
+
+    /// Tries a token without storing it: `Ok` if TMDB accepts it, else why not.
+    pub async fn try_token(&self, token: &str) -> Result<(), TokenProblem> {
+        let resp = self
+            .http
+            .get(format!("{BASE}/authentication"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|_| TokenProblem::Unreachable)?;
+        match resp.status() {
+            s if s.is_success() => Ok(()),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(TokenProblem::Rejected),
+            _ => Err(TokenProblem::Unreachable),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TokenProblem {
+    /// TMDB said no (wrong or revoked token).
+    Rejected,
+    /// TMDB could not be asked (offline, timeout, server error).
+    Unreachable,
 }
 
 #[cfg(test)]
@@ -137,5 +180,16 @@ mod tests {
         assert_eq!(t.language(), "de-DE");
         let inner = REQUEST_LANG.scope("en-US".into(), async { t.language() }).await;
         assert_eq!(inner, "en-US");
+    }
+
+    #[tokio::test]
+    async fn without_token_every_call_asks_for_setup() {
+        let t = Tmdb::new(String::new(), "de-DE".into(), "DE".into());
+        assert!(!t.has_token());
+        assert!(!t.check().await, "no network call without a token");
+        let err = t.get("/movie/popular", &[], None).await.unwrap_err();
+        assert!(format!("{err:?}").contains("needs_setup"));
+        t.set_token("x".into());
+        assert!(t.has_token());
     }
 }

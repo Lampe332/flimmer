@@ -5,18 +5,21 @@ use std::{path::PathBuf, process::ExitCode};
 
 struct Args {
     root: PathBuf,
+    home: Option<PathBuf>,
     port: u16,
     open: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut root = None;
+    let mut home = None;
     let mut port = flimmer::DEFAULT_PORT;
     let mut open = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--root" => root = Some(PathBuf::from(it.next().ok_or("--root needs a path")?)),
+            "--data" => home = Some(PathBuf::from(it.next().ok_or("--data needs a path")?)),
             "--port" => {
                 port = it
                     .next()
@@ -26,7 +29,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--open" => open = true,
             "-h" | "--help" => {
-                println!("Usage: flimmer-server [--root <path>] [--port <port>] [--open]");
+                println!("Usage: flimmer-server [--root <path>] [--data <path>] [--port <port>] [--open]");
                 std::process::exit(0);
             }
             other => return Err(format!("unknown argument: {other}")),
@@ -36,7 +39,7 @@ fn parse_args() -> Result<Args, String> {
         Some(r) => r,
         None => std::env::current_dir().map_err(|e| format!("cannot read current directory: {e}"))?,
     };
-    Ok(Args { root, port, open })
+    Ok(Args { root, home, port, open })
 }
 
 fn open_browser(url: &str) {
@@ -53,7 +56,9 @@ fn open_browser(url: &str) {
 
 async fn run() -> Result<(), String> {
     let args = parse_args()?;
-    let server = flimmer::bind(flimmer::Options { root: args.root, port: args.port, sniffer: None }).await?;
+    // Without --data the data folder is `<root>/data`, as before.
+    let home = args.home.unwrap_or_else(|| args.root.clone());
+    let server = flimmer::bind(flimmer::Options { root: args.root, home, port: args.port, sniffer: None }).await?;
     println!("Flimmer running at {}", server.url);
     if args.open {
         open_browser(&server.url);

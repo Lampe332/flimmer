@@ -20,6 +20,7 @@ import {
   type Settings,
 } from '../lib/api'
 import { useI18n } from '../i18n'
+import { getPrefs } from '../lib/prefs'
 import { formatDate, formatHeight, isUpcoming } from '../lib/format'
 import { rank, torrentBeatsProvider } from '../lib/pick'
 import {
@@ -37,12 +38,33 @@ import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
 /** Server defaults, used until the saved settings have loaded. */
-const DEFAULTS: Settings = { filter: { min_height: 0, audio_lang: 'any', sort: 'quality' }, prefetch_minutes: 10 }
+const DEFAULTS: Settings = { filter: { min_height: 0, audio_lang: 'any', sort: 'quality' }, prefetch_minutes: 10, parallel: 10 }
 const NO_SCAN: Scan = { state: 'unavailable', started_at: null, finished_at: null, results: [] }
 /** Seconds of scanning after which playback starts with the best source found so far. */
 const EARLY_S = 8
 
+/**
+ * "Vollbild beim Abspielen": the browser only allows fullscreen shortly after a click, and the stream is often
+ * ready later. So the page goes fullscreen right when the player opens (the click on "Abspielen") and leaves it
+ * with the player.
+ */
+function useAutoFullscreen() {
+  useEffect(() => {
+    if (!getPrefs().autoFullscreen || document.fullscreenElement) return
+    const html = document.documentElement
+    let mine = false
+    void html
+      .requestFullscreen?.()
+      .then(() => (mine = true))
+      .catch(() => undefined)
+    return () => {
+      if (mine && document.fullscreenElement === html) void document.exitFullscreen().catch(() => undefined)
+    }
+  }, [])
+}
+
 export default function Player() {
+  useAutoFullscreen()
   const { type, id: idRaw } = useParams()
   const [params] = useSearchParams()
   const id = Number(idRaw)

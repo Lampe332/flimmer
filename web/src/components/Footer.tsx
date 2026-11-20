@@ -22,6 +22,8 @@ export default function Footer() {
           <Link to="/serien">{t('nav.tv')}</Link>
           <Link to="/merkliste">{t('nav.watchlist')}</Link>
           <Link to="/suche">{t('nav.search')}</Link>
+          <Link to="/einstellungen">{t('settings.title')}</Link>
+          <Link to="/hilfe">{t('help.title')}</Link>
         </nav>
       </div>
     </footer>

@@ -273,3 +273,35 @@ interface TorrentSettings { vpn_config: string; movies_dir: string; series_dir: 
 - `transcode` (MKV, AC3/DTS/EAC3/TrueHD audio, old video codecs): ffmpeg (`tools/ffmpeg/bin`, gyan.dev build, not in git) writes fragmented MP4 on the fly: video copied when `copy_video` (else H.264), audio → AAC stereo. Also a plain `<video src>`, but the stream is not seekable: to seek, load `/play?...&t=<seconds>` and add `t` to `currentTime`; use `PlayInfo.duration` for the timeline. `audio=<i>` picks the audio track (German/English in "DL" releases), `video=h264` forces a video re-encode if the copied codec does not play.
 
 **Ranking.** `score` = language (wanted `audio_lang` found ≫ `multi`) + quality by `sort` (`quality`: height and source, `bitrate`: size, `speed`: seeders) + seeders (log scale) − penalties (no seeders, below `min_height`, CAM).
+
+## Setup, preferences and data (1.0)
+
+Flimmer runs without `config.json`. Until a TMDB token is stored, every TMDB-backed endpoint answers
+`503 { "error": "...", "code": "needs_setup" }` and `/api/status` has `"needs_setup": true`; the UI then shows the
+first-run setup. A legacy `config.json` (in the data folder or the resource folder) still works: its token is copied
+into the database once and that install counts as set up (no onboarding, no tour). The token is stored in SQLite
+(`settings` key `tmdb_token`) and never sent back to the UI.
+
+| Method | Path | Answer |
+|---|---|---|
+| GET | `/api/setup` | `{ tmdb: "set" \| "missing", onboarded, vpn_file, version, defaults: { movies_dir, series_dir } }` |
+| PUT | `/api/setup/tmdb` | JSON `{ token }`; checked with TMDB (`/authentication`), stored only if accepted → `204`; errors with `code`: `format`/`api_key` (400), `rejected` (422), `unreachable` (502) |
+| POST | `/api/setup/done` | `204`, onboarding finished |
+| PUT | `/api/setup/vpn` | JSON `{ text }` (WireGuard file, max 8 KB) → checked, written to `<data>/vpn/proton.conf`, torrent settings point at it → `204`. Content is never echoed or logged. |
+| DELETE | `/api/setup/vpn` | removes that file, tunnel down → `204` |
+| POST | `/api/setup/open` | JSON `{ page }` with a fixed id (`tmdb_signup`, `tmdb_api`, `proton_wireguard`, license pages) → opens it in the system browser |
+| POST | `/api/setup/reset` | JSON `{ confirm: "reset" }` → empties watchlist, progress, history, settings (token, prefs), scans, health; deletes the VPN file. Torrents and downloaded files stay. |
+| GET / PUT | `/api/prefs` | UI preferences object (max 16 KB), opaque to the server |
+| POST | `/api/export` | writes `Flimmer-Einstellungen-<date>.json` (prefs, source settings, torrent folders/upload, watchlist; never token or VPN file) into the user's Downloads folder → `{ path }` |
+| POST | `/api/import` | body = such a file → applies each part with the normal validation, merges the watchlist → `{ watchlist: n }` |
+| GET | `/api/maintenance` | `{ stream_cache_bytes, scan_profile_bytes, scan_profile_pending, data_dir }` |
+| DELETE | `/api/maintenance/cache` | clears the stream cache and saved scan results now, the source-search browser profile on the next start |
+
+`Settings` (`/api/settings`) has `parallel` (4..=12, default 10): provider pages loading at the same time in a scan.
+
+All POST/PUT bodies above must be `application/json`, so another web page cannot send them (CORS preflight).
+
+**Folders.** Development (`--root`): data in `<root>/data` as before. Installed: resources next to `Flimmer.exe`,
+data in `%LOCALAPPDATA%\local.flimmer.desktop\data` (the folder the uninstaller offers to delete). `--data <dir>`
+overrides it. The desktop app uses the port of its last start, else 43300, else the next free one up to 43399
+(`--port` pins one), and refuses a second start on the same data folder.

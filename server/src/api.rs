@@ -150,7 +150,7 @@ async fn api_not_found() -> ApiError {
 }
 
 async fn status(State(st): St) -> Json<Value> {
-    Json(json!({ "tmdb_ok": st.tmdb.check().await, "version": env!("CARGO_PKG_VERSION") }))
+    Json(json!({ "tmdb_ok": st.tmdb.check().await, "needs_setup": !st.tmdb.has_token(), "version": env!("CARGO_PKG_VERSION") }))
 }
 
 #[derive(Serialize)]

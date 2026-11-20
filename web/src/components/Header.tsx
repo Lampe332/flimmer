@@ -8,13 +8,13 @@ import Logo from './Logo'
 import SettingsMenu from './SettingsMenu'
 import { HeaderVpn } from './Torrents'
 
-const NAV: { to: string; label: Key; end: boolean; icon: IconName }[] = [
+const NAV: { to: string; label: Key; end: boolean; icon: IconName; tour?: string }[] = [
   { to: '/', label: 'nav.home', end: true, icon: 'home' },
   { to: '/filme', label: 'nav.movies', end: false, icon: 'film' },
   { to: '/serien', label: 'nav.tv', end: false, icon: 'tv' },
   { to: '/merkliste', label: 'nav.watchlist', end: false, icon: 'bookmark' },
-  { to: '/verlauf', label: 'nav.history', end: false, icon: 'clock' },
-  { to: '/downloads', label: 'nav.downloads', end: false, icon: 'download' },
+  { to: '/verlauf', label: 'nav.history', end: false, icon: 'clock', tour: 'history' },
+  { to: '/downloads', label: 'nav.downloads', end: false, icon: 'download', tour: 'downloads' },
 ]
 
 /** Series with new episodes on the history entry, running downloads on the downloads entry. */
@@ -97,7 +97,7 @@ export default function Header() {
           <Logo />
           <nav className="nav" aria-label={t('nav.main')}>
             {NAV.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
+              <NavLink key={n.to} to={n.to} end={n.end} className="nav-link" data-tour={n.tour}>
                 {t(n.label)}
                 <Badge to={n.to} fresh={fresh} loading={loading} />
               </NavLink>
@@ -105,6 +105,7 @@ export default function Header() {
           </nav>
           <form
             className="search"
+            data-tour="search"
             role="search"
             onSubmit={(e) => {
               e.preventDefault()
@@ -139,7 +140,7 @@ export default function Header() {
 
       <nav className="tabbar" aria-label={t('nav.main')}>
         {NAV.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link">
+          <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link" data-tour={n.tour}>
             <span className="tabbar-icon">
               <Icon name={n.icon} size={22} />
               <Badge to={n.to} fresh={fresh} loading={loading} />

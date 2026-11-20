@@ -10,11 +10,13 @@ use serde_json::json;
 pub struct ApiError {
     status: StatusCode,
     message: String,
+    /// Machine-readable reason the UI acts on, e.g. `needs_setup`.
+    code: Option<&'static str>,
 }
 
 impl ApiError {
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self { status, message: message.into() }
+        Self { status, message: message.into(), code: None }
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
@@ -29,6 +31,11 @@ impl ApiError {
         Self::new(StatusCode::BAD_GATEWAY, message)
     }
 
+    /// No TMDB token yet: the UI shows the first-run setup.
+    pub fn needs_setup() -> Self {
+        Self { code: Some("needs_setup"), ..Self::new(StatusCode::SERVICE_UNAVAILABLE, "Flimmer is not set up yet (TMDB token missing)") }
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
@@ -36,7 +43,11 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
+        let body = match self.code {
+            Some(code) => json!({ "error": self.message, "code": code }),
+            None => json!({ "error": self.message }),
+        };
+        (self.status, Json(body)).into_response()
     }
 }
 

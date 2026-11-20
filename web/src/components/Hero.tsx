@@ -64,7 +64,7 @@ export default function Hero({ items }: { items: Item[] }) {
         </h1>
         {current.overview && <p className="hero-overview">{current.overview}</p>}
         <div className="actions">
-          <Link to={playStartPath(current)} className="btn btn-primary btn-lg">
+          <Link to={playStartPath(current)} className="btn btn-primary btn-lg" data-tour="play">
             <Icon name="play" size={18} />
             {t('common.play')}
           </Link>

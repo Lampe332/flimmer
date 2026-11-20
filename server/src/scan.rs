@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 use crate::{
     api::{self, AppState, Source},
@@ -27,9 +27,11 @@ use crate::{
 };
 
 const REUSE_MS: i64 = 6 * 60 * 60 * 1000;
-/// Pages loading at the same time. More finish a scan sooner, but pages that normally have a
-/// stream then fail to start more often (tried: 8, 10, 12; see docs/scan-speed.md).
+/// Pages loading at the same time (default; the setting allows 4..=12). More finish a scan sooner, but pages
+/// that normally have a stream then fail to start more often (tried: 8, 10, 12; see docs/scan-speed.md).
 const PARALLEL: usize = 10;
+const PARALLEL_MIN: usize = 4;
+const PARALLEL_MAX: usize = 12;
 /// The sniffer gives up on its own after at most ~25 s; this only guards against one that hangs.
 const PROBE_LIMIT: Duration = Duration::from_secs(32);
 /// A provider without a stream in this many scans in a row is skipped ...
@@ -115,12 +117,57 @@ type Shared = Arc<Mutex<ScanData>>;
 
 pub struct Scans {
     map: Mutex<HashMap<String, Shared>>,
+    /// `PARALLEL_MAX` permits; the ones above the setting are parked, so a change never cuts running pages short.
     slots: Arc<Semaphore>,
+    parked: Arc<Mutex<Vec<OwnedSemaphorePermit>>>,
+    want_parked: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Default for Scans {
     fn default() -> Self {
-        Self { map: Mutex::new(HashMap::new()), slots: Arc::new(Semaphore::new(PARALLEL)) }
+        let slots = Arc::new(Semaphore::new(PARALLEL_MAX));
+        let parked = (0..PARALLEL_MAX - PARALLEL).filter_map(|_| slots.clone().try_acquire_owned().ok()).collect();
+        Self {
+            map: Mutex::new(HashMap::new()),
+            slots,
+            parked: Arc::new(Mutex::new(parked)),
+            want_parked: Arc::new((PARALLEL_MAX - PARALLEL).into()),
+        }
+    }
+}
+
+impl Scans {
+    /// Pages that may load at the same time from now on. Fewer: free slots are parked at once, busy ones as their
+    /// page finishes. More: parked slots are released at once.
+    pub fn set_parallel(&self, n: usize) {
+        use std::sync::atomic::Ordering;
+        let want = PARALLEL_MAX - n.clamp(PARALLEL_MIN, PARALLEL_MAX);
+        self.want_parked.store(want, Ordering::SeqCst);
+        let mut parked = lock(&self.parked);
+        parked.truncate(want);
+        while parked.len() < want {
+            match self.slots.clone().try_acquire_owned() {
+                Ok(p) => parked.push(p),
+                Err(_) => {
+                    let (slots, parked, target) = (self.slots.clone(), self.parked.clone(), self.want_parked.clone());
+                    tokio::spawn(async move {
+                        while let Ok(p) = slots.clone().acquire_owned().await {
+                            let mut list = lock(&parked);
+                            if list.len() >= target.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            list.push(p);
+                        }
+                    });
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Pages that may load at the same time right now.
+    pub fn parallel(&self) -> usize {
+        PARALLEL_MAX - lock(&self.parked).len()
     }
 }
 
@@ -568,6 +615,13 @@ pub struct Filter {
 pub struct Settings {
     pub filter: Filter,
     pub prefetch_minutes: u32,
+    /// Provider pages loading at the same time during a scan (4..=12).
+    #[serde(default = "default_parallel")]
+    pub parallel: u32,
+}
+
+fn default_parallel() -> u32 {
+    PARALLEL as u32
 }
 
 impl Default for Settings {
@@ -575,6 +629,7 @@ impl Default for Settings {
         Self {
             filter: Filter { min_height: 0, audio_lang: "any".into(), sort: "quality".into() },
             prefetch_minutes: 10,
+            parallel: default_parallel(),
         }
     }
 }
@@ -608,8 +663,12 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
     if !(1..=120).contains(&s.prefetch_minutes) {
         return Err(ApiError::bad_request("prefetch_minutes must be between 1 and 120"));
     }
+    if !(PARALLEL_MIN as u32..=PARALLEL_MAX as u32).contains(&s.parallel) {
+        return Err(ApiError::bad_request("parallel must be between 4 and 12"));
+    }
     let data = serde_json::to_string(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
     st.db.blob_put(Table::Settings, SETTINGS_KEY, &data)?;
+    st.scans.set_parallel(s.parallel as usize);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -695,5 +754,27 @@ mod tests {
         assert_eq!(super::iso(0), "1970-01-01T00:00:00Z");
         assert_eq!(super::iso(1_795_197_845_000), "2026-11-20T18:04:05Z");
         assert_eq!(super::iso(951_782_400_000), "2000-02-29T00:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn parallel_setting_resizes_without_cutting_running_pages() {
+        let s = super::Scans::default();
+        assert_eq!(s.parallel(), 10);
+        s.set_parallel(12);
+        assert_eq!(s.parallel(), 12);
+        s.set_parallel(1);
+        assert_eq!(s.parallel(), 4, "clamped to the minimum");
+        // Four pages busy, then down to 4 is already true; up to 6 frees two slots at once.
+        let busy: Vec<_> = (0..4).map(|_| s.slots.clone().try_acquire_owned().unwrap()).collect();
+        s.set_parallel(6);
+        assert_eq!(s.slots.available_permits(), 2);
+        // Down to 4 while six are busy: the slots park as soon as pages finish.
+        let more: Vec<_> = (0..2).map(|_| s.slots.clone().try_acquire_owned().unwrap()).collect();
+        s.set_parallel(4);
+        drop(more);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(s.parallel(), 4);
+        assert_eq!(s.slots.available_permits(), 0);
+        drop(busy);
     }
 }

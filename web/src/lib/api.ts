@@ -109,6 +109,8 @@ export interface Filter {
 export interface Settings {
   filter: Filter
   prefetch_minutes: number
+  /** Provider pages loading at the same time during a scan (4..12). */
+  parallel: number
 }
 
 export interface BufferState {
@@ -198,9 +200,12 @@ export type ListKind = 'popular' | 'top_rated' | 'trending' | 'now_playing' | 'o
 /** Error with HTTP status; status 0 = backend unreachable. */
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** Machine-readable reason from the server, e.g. "needs_setup". */
+  readonly code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.status = status
+    this.code = code
   }
 }
 
@@ -215,13 +220,16 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let message = t('api.status', { status: res.status })
+    let code: string | undefined
     try {
-      const body = (await res.json()) as { error?: string }
+      const body = (await res.json()) as { error?: string; code?: string }
       if (body.error) message = body.error
+      code = body.code
     } catch {
       /* body was not JSON, keep status message */
     }
-    throw new ApiError(res.status, message)
+    if (code === 'needs_setup') window.dispatchEvent(new Event('flimmer:needs-setup'))
+    throw new ApiError(res.status, message, code)
   }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T

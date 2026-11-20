@@ -63,8 +63,8 @@ pub struct Probe {
     pub copy_video: bool,
 }
 
-fn tool(st: &AppState, name: &str) -> Option<PathBuf> {
-    let dir = st.torrents.root.join("tools").join("ffmpeg");
+fn tool(_st: &AppState, name: &str) -> Option<PathBuf> {
+    let dir = crate::paths::tools().join("ffmpeg");
     [dir.join("bin").join(name), dir.join(name)].into_iter().find(|p| p.is_file())
 }
 
