@@ -5,20 +5,18 @@ import Row from '../components/Row'
 import { EmptyState, ErrorState, PageLoader } from '../components/States'
 import { NewEpisodeCard, ProgressBar } from '../components/WatchCards'
 import { titlePath, type HistoryEntry } from '../lib/api'
-import { typeLabel } from '../lib/format'
+import { t, useI18n } from '../i18n'
+import { locale, typeLabel } from '../lib/format'
 import { epCode, remaining, useHistory, useHistoryDelete, useNewEpisodes } from '../lib/progress'
 import { useTitle } from '../lib/title'
-
-const dayFmt = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })
-const dayYearFmt = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-const timeFmt = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' })
 
 function dayLabel(d: Date, now: Date): string {
   const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const days = Math.round((start(now) - start(d)) / 86_400_000)
-  if (days === 0) return 'Heute'
-  if (days === 1) return 'Gestern'
-  return (d.getFullYear() === now.getFullYear() ? dayFmt : dayYearFmt).format(d)
+  if (days === 0) return t('hist.today')
+  if (days === 1) return t('hist.yesterday')
+  const year = d.getFullYear() === now.getFullYear() ? undefined : 'numeric'
+  return new Intl.DateTimeFormat(locale(), { weekday: 'long', day: 'numeric', month: 'long', year }).format(d)
 }
 
 /** Entries grouped by local calendar day, newest day first (the server already sorts newest first). */
@@ -36,7 +34,8 @@ function byDay(entries: HistoryEntry[]): { label: string; key: string; entries: 
 }
 
 export default function History() {
-  useTitle('Verlauf')
+  const { t } = useI18n()
+  useTitle(t('nav.history'))
   const history = useHistory()
   const fresh = useNewEpisodes()
   const remove = useHistoryDelete()
@@ -52,21 +51,19 @@ export default function History() {
     <div className="verlauf">
       <div className="page-head verlauf-head">
         <div>
-          <h1 className="page-title">Verlauf</h1>
-          {entries.length > 0 && (
-            <p className="page-sub">{entries.length === 1 ? '1 Eintrag' : `${entries.length} Einträge`}</p>
-          )}
+          <h1 className="page-title">{t('nav.history')}</h1>
+          {entries.length > 0 && <p className="page-sub">{t('hist.count', { n: entries.length })}</p>}
         </div>
         {entries.length > 0 && (
           <button type="button" className="btn btn-glass" onClick={() => setConfirm(true)}>
             <Icon name="trash" size={17} />
-            Verlauf löschen
+            {t('hist.clear')}
           </button>
         )}
       </div>
 
       {fresh.data && fresh.data.length > 0 && (
-        <Row title="Neue Folgen deiner Serien">
+        <Row title={t('home.newEpisodes')}>
           {fresh.data.map((n) => (
             <NewEpisodeCard key={n.item.id} ep={n} />
           ))}
@@ -76,11 +73,11 @@ export default function History() {
       {entries.length === 0 ? (
         <EmptyState
           icon="clock"
-          title="Noch nichts angesehen"
-          text="Was du in Flimmer abspielst, landet hier, nach Tagen sortiert. Angefangene Titel findest du auf der Startseite unter Weiterschauen."
+          title={t('hist.emptyTitle')}
+          text={t('hist.emptyText')}
         >
           <Link to="/" className="btn btn-primary">
-            Zur Startseite
+            {t('common.toHome')}
           </Link>
         </EmptyState>
       ) : (
@@ -113,10 +110,11 @@ export default function History() {
 }
 
 function HistoryRow({ h, onRemove }: { h: HistoryEntry; onRemove: () => void }) {
+  const { t } = useI18n()
   const code = epCode(h.season, h.episode)
   const tv = h.item.type === 'tv'
   const to = tv && h.season !== null ? `${titlePath(h.item)}?staffel=${h.season}` : titlePath(h.item)
-  const time = timeFmt.format(new Date(h.watched_at))
+  const time = new Intl.DateTimeFormat(locale(), { hour: '2-digit', minute: '2-digit' }).format(new Date(h.watched_at))
   return (
     <li className="hist">
       <time className="hist-time" dateTime={h.watched_at}>
@@ -151,7 +149,7 @@ function HistoryRow({ h, onRemove }: { h: HistoryEntry; onRemove: () => void }) 
             {h.finished ? (
               <span className="episode-state is-seen">
                 <Icon name="check" size={13} stroke={2.4} />
-                Gesehen
+                {t('ep.seen')}
               </span>
             ) : (
               <span>{remaining(h.position, h.duration)}</span>
@@ -162,8 +160,8 @@ function HistoryRow({ h, onRemove }: { h: HistoryEntry; onRemove: () => void }) 
       <button
         type="button"
         className="icon-btn hist-remove"
-        aria-label={`${h.item.title}${code ? ` ${code}` : ''} aus dem Verlauf entfernen`}
-        title="Aus dem Verlauf entfernen"
+        aria-label={t('hist.removeLabel', { title: `${h.item.title}${code ? ` ${code}` : ''}` })}
+        title={t('hist.removeTitle')}
         onClick={onRemove}
       >
         <Icon name="close" size={16} />
@@ -173,6 +171,7 @@ function HistoryRow({ h, onRemove }: { h: HistoryEntry; onRemove: () => void }) 
 }
 
 function ConfirmClear({ count, onCancel, onConfirm }: { count: number; onCancel: () => void; onConfirm: () => void }) {
+  const { t } = useI18n()
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const d = ref.current
@@ -191,18 +190,15 @@ function ConfirmClear({ count, onCancel, onConfirm }: { count: number; onCancel:
       }}
     >
       <div className="confirm">
-        <h2 id="clear-title">Verlauf löschen?</h2>
-        <p>
-          {count === 1 ? 'Der Eintrag wird' : `Alle ${count} Einträge werden`} entfernt. Gespeicherte Positionen zum
-          Weiterschauen und gesehene Folgen bleiben erhalten.
-        </p>
+        <h2 id="clear-title">{t('hist.confirmTitle')}</h2>
+        <p>{t('hist.confirmText', { n: count })}</p>
         <div className="actions">
           <button type="button" className="btn btn-glass" onClick={onCancel} autoFocus>
-            Abbrechen
+            {t('common.cancel')}
           </button>
           <button type="button" className="btn btn-danger" onClick={onConfirm}>
             <Icon name="trash" size={17} />
-            Verlauf löschen
+            {t('hist.clear')}
           </button>
         </div>
       </div>

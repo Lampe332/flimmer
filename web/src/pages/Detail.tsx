@@ -8,6 +8,7 @@ import Row from '../components/Row'
 import SaveButton from '../components/SaveButton'
 import SeasonTabs from '../components/SeasonTabs'
 import { ErrorState, PageLoader } from '../components/States'
+import { useI18n } from '../i18n'
 import { api, isMediaType, playPath } from '../lib/api'
 import { formatRating, formatRuntime, typeLabel } from '../lib/format'
 import { epCode, remaining, resumeTarget, useProgress } from '../lib/progress'
@@ -22,6 +23,7 @@ export default function Detail() {
   const valid = isMediaType(type) && Number.isInteger(id) && id > 0
   const [params, setParams] = useSearchParams()
   const [trailer, setTrailer] = useState(false)
+  const { t } = useI18n()
 
   const q = useQuery({
     queryKey: ['title', type, id],
@@ -47,7 +49,7 @@ export default function Detail() {
   const tvStarted = tvResume?.row && !tvResume.row.finished && tvResume.row.position >= 30 ? tvResume.row : undefined
   const seasonParam = Number(params.get('staffel'))
   const hasSeason = (n: number | undefined) => d.seasons.some((s) => s.season_number === n)
-  // Without a chosen season, open the one "Weiterschauen" continues in.
+  // Without a chosen season, open the one "continue watching" continues in.
   const season = hasSeason(seasonParam) ? seasonParam : hasSeason(tvResume?.s) ? tvResume?.s : firstSeason
   const browse = d.type === 'movie' ? '/filme' : '/serien'
   const seasonCount = d.seasons.length
@@ -62,7 +64,7 @@ export default function Detail() {
       <div className="detail-head">
         <div className="detail-poster">
           {d.poster ? (
-            <img src={d.poster} alt={`Poster von ${d.title}`} width={500} height={750} />
+            <img src={d.poster} alt={t('detail.posterAlt', { title: d.title })} width={500} height={750} />
           ) : (
             <div className="card-noposter">
               <Icon name="film" size={40} />
@@ -73,8 +75,8 @@ export default function Detail() {
           <ul className="meta">
             <li className="meta-tag">{typeLabel(d.type)}</li>
             {d.year && <li>{d.year}</li>}
-            {runtime && <li>{d.type === 'tv' ? `${runtime} pro Folge` : runtime}</li>}
-            {d.type === 'tv' && seasonCount > 0 && <li>{seasonCount === 1 ? '1 Staffel' : `${seasonCount} Staffeln`}</li>}
+            {runtime && <li>{d.type === 'tv' ? t('detail.perEpisode', { runtime }) : runtime}</li>}
+            {d.type === 'tv' && seasonCount > 0 && <li>{t('detail.seasons', { n: seasonCount })}</li>}
             {rating && (
               <li className="meta-rating">
                 <Icon name="star" size={14} />
@@ -89,25 +91,25 @@ export default function Detail() {
             {tvResume ? (
               <Link to={playPath('tv', d.id, tvResume.s, tvResume.e)} className="btn btn-primary btn-lg">
                 <Icon name="play" size={18} />
-                Weiterschauen {epCode(tvResume.s, tvResume.e)}
+                {t('home.continue')} {epCode(tvResume.s, tvResume.e)}
                 {tvStarted && <span className="btn-note">{remaining(tvStarted.position, tvStarted.duration)}</span>}
               </Link>
             ) : movieResume ? (
               <Link to={playPath('movie', d.id)} className="btn btn-primary btn-lg">
                 <Icon name="play" size={18} />
-                Weiterschauen
+                {t('home.continue')}
                 <span className="btn-note">{remaining(movieResume.position, movieResume.duration)}</span>
               </Link>
             ) : (
               <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className="btn btn-primary btn-lg">
                 <Icon name="play" size={18} />
-                {d.type === 'tv' ? 'Ab Folge 1 abspielen' : 'Abspielen'}
+                {d.type === 'tv' ? t('detail.playFirst') : t('common.play')}
               </Link>
             )}
             {d.trailer_youtube_key && (
               <button type="button" className="btn btn-glass btn-lg" onClick={() => setTrailer(true)}>
                 <Icon name="film" size={18} />
-                Trailer
+                {t('detail.trailer')}
               </button>
             )}
             <SaveButton item={d} />
@@ -115,10 +117,10 @@ export default function Detail() {
           {d.overview ? (
             <p className="detail-overview">{d.overview}</p>
           ) : (
-            <p className="detail-overview muted">Keine Beschreibung auf Deutsch vorhanden.</p>
+            <p className="detail-overview muted">{t('detail.noOverview')}</p>
           )}
           {d.genres.length > 0 && (
-            <ul className="detail-genres" aria-label="Genres">
+            <ul className="detail-genres" aria-label={t('detail.genres')}>
               {d.genres.map((g) => (
                 <li key={g.id}>
                   <Link to={`${browse}?genre=${g.id}`} className="chip">
@@ -132,9 +134,9 @@ export default function Detail() {
       </div>
 
       {d.type === 'tv' && season !== undefined && (
-        <section className="detail-section" aria-label="Episoden">
+        <section className="detail-section" aria-label={t('detail.episodes')}>
           <div className="section-head">
-            <h2 className="row-title">Episoden</h2>
+            <h2 className="row-title">{t('detail.episodes')}</h2>
             <SeasonTabs
               seasons={d.seasons}
               value={season}
@@ -146,7 +148,7 @@ export default function Detail() {
       )}
 
       {d.cast.length > 0 && (
-        <Row title="Besetzung">
+        <Row title={t('detail.cast')}>
           {d.cast.map((c) => (
             <figure key={`${c.name}-${c.character}`} className="person">
               <div className="person-img">
@@ -166,7 +168,7 @@ export default function Detail() {
       )}
 
       {d.recommendations.length > 0 && (
-        <Row title="Das könnte dir auch gefallen">
+        <Row title={t('detail.recommendations')}>
           {d.recommendations.map((r) => (
             <PosterCard key={`${r.type}-${r.id}`} item={r} />
           ))}

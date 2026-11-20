@@ -190,8 +190,8 @@ pub fn genres_from(v: &Value) -> Vec<Genre> {
         .unwrap_or_default()
 }
 
-/// Picks a YouTube trailer: German first, then English, then any language.
-fn trailer_key(v: &Value) -> Option<String> {
+/// Picks a YouTube trailer: `pref` language first (e.g. "de"), then English, then any language.
+fn trailer_key(v: &Value, pref: &str) -> Option<String> {
     let videos = v.pointer("/videos/results")?.as_array()?;
     let trailers: Vec<&Value> = videos
         .iter()
@@ -208,13 +208,15 @@ fn trailer_key(v: &Value) -> Option<String> {
             .max_by_key(|x| x.get("official").and_then(Value::as_bool).unwrap_or(false))
             .copied()
     };
-    lang("de")
+    lang(pref)
         .or_else(|| lang("en"))
+        .or_else(|| lang("de"))
         .or_else(|| trailers.first().copied())
         .and_then(|x| str_of(x, "key"))
 }
 
-pub fn details_from(v: &Value, kind: MediaType) -> Option<Details> {
+/// `trailer_lang`: ISO 639-1 code of the preferred trailer language.
+pub fn details_from(v: &Value, kind: MediaType, trailer_lang: &str) -> Option<Details> {
     let item = item_from(v, Some(kind))?;
 
     let (original_title, imdb_id, runtime) = match kind {
@@ -289,7 +291,7 @@ pub fn details_from(v: &Value, kind: MediaType) -> Option<Details> {
         genres: genres_from(v),
         runtime,
         tagline: str_of(v, "tagline"),
-        trailer_youtube_key: trailer_key(v),
+        trailer_youtube_key: trailer_key(v, trailer_lang),
         seasons,
         cast,
         recommendations,

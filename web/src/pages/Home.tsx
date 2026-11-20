@@ -6,18 +6,20 @@ import PosterCard, { WideCard, WideSkeletons } from '../components/PosterCard'
 import Row from '../components/Row'
 import { CardSkeletons, ErrorState } from '../components/States'
 import { ContinueCard, NewEpisodeCard } from '../components/WatchCards'
+import { useI18n, type Key } from '../i18n'
 import { api, type Home as HomeData, type Item } from '../lib/api'
 import { useContinue, useHideContinue, useNewEpisodes } from '../lib/progress'
 
-const ROWS: { key: keyof HomeData; title: string; more?: string }[] = [
-  { key: 'trending', title: 'Heute angesagt' },
-  { key: 'popular_movies', title: 'Beliebte Filme', more: '/filme' },
-  { key: 'popular_tv', title: 'Beliebte Serien', more: '/serien' },
-  { key: 'top_rated_movies', title: 'Top bewertete Filme', more: '/filme?liste=top_rated' },
-  { key: 'top_rated_tv', title: 'Top bewertete Serien', more: '/serien?liste=top_rated' },
+const ROWS: { key: keyof HomeData; title: Key; more?: string }[] = [
+  { key: 'trending', title: 'home.trending' },
+  { key: 'popular_movies', title: 'home.popularMovies', more: '/filme' },
+  { key: 'popular_tv', title: 'home.popularTv', more: '/serien' },
+  { key: 'top_rated_movies', title: 'home.topMovies', more: '/filme?liste=top_rated' },
+  { key: 'top_rated_tv', title: 'home.topTv', more: '/serien?liste=top_rated' },
 ]
 
 export default function Home() {
+  const { t } = useI18n()
   const { data, isPending, error, refetch } = useQuery({ queryKey: ['home'], queryFn: api.home })
   const watching = useContinue()
   const fresh = useNewEpisodes()
@@ -30,7 +32,7 @@ export default function Home() {
       {isPending ? <HeroSkeleton /> : <Hero items={data.trending} />}
       <div className="shelves">
         {watching.data && watching.data.length > 0 && (
-          <Row title="Weiterschauen">
+          <Row title={t('home.continue')}>
             {watching.data.map((c) => (
               <ContinueCard
                 key={`${c.item.type}-${c.item.id}`}
@@ -41,7 +43,7 @@ export default function Home() {
           </Row>
         )}
         {fresh.data && fresh.data.length > 0 && (
-          <Row title="Neue Folgen deiner Serien">
+          <Row title={t('home.newEpisodes')}>
             {fresh.data.map((n) => (
               <NewEpisodeCard key={n.item.id} ep={n} />
             ))}
@@ -50,11 +52,11 @@ export default function Home() {
         {ROWS.map((r) => (
           <Row
             key={r.key}
-            title={r.title}
+            title={t(r.title)}
             action={
               r.more ? (
                 <Link to={r.more} className="row-more">
-                  Alle anzeigen
+                  {t('home.all')}
                   <Icon name="right" size={14} />
                 </Link>
               ) : undefined

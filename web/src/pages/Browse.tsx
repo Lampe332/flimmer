@@ -2,29 +2,31 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router'
 import ResultGrid from '../components/ResultGrid'
 import { EmptyState, ErrorState } from '../components/States'
+import { useI18n, type Key } from '../i18n'
 import { api, type ListKind, type MediaType } from '../lib/api'
 import { useTitle } from '../lib/title'
 
-const TABS: Record<MediaType, { id: ListKind; label: string; hint: string }[]> = {
+const TABS: Record<MediaType, { id: ListKind; label: Key; hint: Key }[]> = {
   movie: [
-    { id: 'popular', label: 'Beliebt', hint: 'Was gerade am meisten geschaut wird' },
-    { id: 'top_rated', label: 'Top bewertet', hint: 'Die bestbewerteten Titel bei TMDB' },
-    { id: 'trending', label: 'Trending', hint: 'Heute besonders gefragt' },
-    { id: 'now_playing', label: 'Im Kino', hint: 'Läuft aktuell auf der großen Leinwand' },
+    { id: 'popular', label: 'browse.popular', hint: 'browse.popularHint' },
+    { id: 'top_rated', label: 'browse.top', hint: 'browse.topHint' },
+    { id: 'trending', label: 'browse.trending', hint: 'browse.trendingHint' },
+    { id: 'now_playing', label: 'browse.nowPlaying', hint: 'browse.nowPlayingHint' },
   ],
   tv: [
-    { id: 'popular', label: 'Beliebt', hint: 'Was gerade am meisten geschaut wird' },
-    { id: 'top_rated', label: 'Top bewertet', hint: 'Die bestbewerteten Titel bei TMDB' },
-    { id: 'trending', label: 'Trending', hint: 'Heute besonders gefragt' },
-    { id: 'on_the_air', label: 'Läuft gerade', hint: 'Serien mit neuen Folgen in diesen Wochen' },
+    { id: 'popular', label: 'browse.popular', hint: 'browse.popularHint' },
+    { id: 'top_rated', label: 'browse.top', hint: 'browse.topHint' },
+    { id: 'trending', label: 'browse.trending', hint: 'browse.trendingHint' },
+    { id: 'on_the_air', label: 'browse.onAir', hint: 'browse.onAirHint' },
   ],
 }
 
 export default function Browse({ type }: { type: MediaType }) {
+  const { t } = useI18n()
   const [params, setParams] = useSearchParams()
   const tabs = TABS[type]
   const listParam = params.get('liste')
-  const list: ListKind = tabs.find((t) => t.id === listParam)?.id ?? 'popular'
+  const list: ListKind = tabs.find((x) => x.id === listParam)?.id ?? 'popular'
   const genreRaw = Number(params.get('genre'))
   const genre = Number.isInteger(genreRaw) && genreRaw > 0 ? genreRaw : null
 
@@ -38,9 +40,10 @@ export default function Browse({ type }: { type: MediaType }) {
   })
 
   const items = q.data?.pages.flatMap((p) => p.results) ?? []
-  const heading = type === 'movie' ? 'Filme' : 'Serien'
+  const heading = t(type === 'movie' ? 'nav.movies' : 'nav.tv')
   useTitle(heading)
   const genreName = genre !== null ? genres.data?.find((g) => g.id === genre)?.name : undefined
+  const hint = tabs.find((x) => x.id === list)?.hint
 
   const setTab = (id: ListKind) => setParams(id === 'popular' ? {} : { liste: id }, { replace: true })
   const setGenre = (id: number | null) => setParams(id === null ? {} : { genre: String(id) }, { replace: true })
@@ -50,27 +53,27 @@ export default function Browse({ type }: { type: MediaType }) {
       <div className="page-head">
         <div>
           <h1 className="page-title">{heading}</h1>
-          <p className="page-sub">{genreName ? `${genreName}, nach Beliebtheit sortiert` : tabs.find((t) => t.id === list)?.hint}</p>
+          <p className="page-sub">{genreName ? t('browse.genreSorted', { genre: genreName }) : hint && t(hint)}</p>
         </div>
-        <div className="tabs" role="tablist" aria-label={`${heading} sortieren`}>
-          {tabs.map((t) => (
+        <div className="tabs" role="tablist" aria-label={t('browse.sort', { heading })}>
+          {tabs.map((x) => (
             <button
-              key={t.id}
+              key={x.id}
               type="button"
               role="tab"
-              aria-selected={genre === null && list === t.id}
+              aria-selected={genre === null && list === x.id}
               className="tab"
-              onClick={() => setTab(t.id)}
+              onClick={() => setTab(x.id)}
             >
-              {t.label}
+              {t(x.label)}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="genres" role="group" aria-label="Nach Genre filtern">
+      <div className="genres" role="group" aria-label={t('browse.genreFilter')}>
         <button type="button" className="chip" aria-pressed={genre === null} onClick={() => setGenre(null)}>
-          Alle Genres
+          {t('browse.allGenres')}
         </button>
         {genres.data?.map((g) => (
           <button
@@ -88,7 +91,7 @@ export default function Browse({ type }: { type: MediaType }) {
       {q.error ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       ) : !q.isPending && items.length === 0 ? (
-        <EmptyState title="Keine Titel" text="In dieser Auswahl gibt es gerade nichts. Probier ein anderes Genre." />
+        <EmptyState title={t('browse.emptyTitle')} text={t('browse.emptyText')} />
       ) : (
         <ResultGrid
           items={items}

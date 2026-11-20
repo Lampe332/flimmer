@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { useI18n } from '../i18n'
 import { MARK, WORD, WORD_CAP, WORD_DOT, WORD_WIDTH } from './brand'
 
 const CAP = 118
@@ -36,8 +37,9 @@ export function Lockup({ height = 26 }: { height?: number }) {
 }
 
 export default function Logo() {
+  const { t } = useI18n()
   return (
-    <Link to="/" className="logo" aria-label="Flimmer, zur Startseite">
+    <Link to="/" className="logo" aria-label={t('app.home')}>
       <Lockup />
     </Link>
   )

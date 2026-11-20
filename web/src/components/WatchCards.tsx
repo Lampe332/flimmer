@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import { Link } from 'react-router'
+import { useI18n } from '../i18n'
 import { playPath, type ContinueEntry, type NewEpisode } from '../lib/api'
 import { formatDate } from '../lib/format'
 import { epCode, ratio, remaining } from '../lib/progress'
@@ -24,12 +25,13 @@ function Art({ src, alt }: { src: string | null; alt: string }) {
   )
 }
 
-/** "Weiterschauen": landscape card that plays straight away. */
+/** "Continue watching": landscape card that plays straight away. */
 export const ContinueCard = memo(function ContinueCard({ entry, onRemove }: { entry: ContinueEntry; onRemove: () => void }) {
+  const { t } = useI18n()
   const { item } = entry
   const code = epCode(entry.season, entry.episode)
   const left = entry.up_next ? null : remaining(entry.position, entry.duration)
-  const label = [item.title, code, entry.up_next ? 'nächste Folge abspielen' : 'weiterschauen'].filter(Boolean).join(', ')
+  const label = [item.title, code, entry.up_next ? t('watch.nextEpisode') : t('watch.resume')].filter(Boolean).join(', ')
   return (
     <article className="card card-wide card-watch">
       <Link to={playPath(item.type, item.id, entry.season ?? 1, entry.episode ?? 1)} className="card-link" aria-label={label}>
@@ -43,7 +45,7 @@ export const ContinueCard = memo(function ContinueCard({ entry, onRemove }: { en
             <p className="card-meta">
               {code && <span className="card-ep">{code}</span>}
               {entry.episode_name && <span className="card-ep-name">{entry.episode_name}</span>}
-              {entry.up_next ? <span className="card-tag">Nächste Folge</span> : left && <span className="card-left">{left}</span>}
+              {entry.up_next ? <span className="card-tag">{t('watch.nextTag')}</span> : left && <span className="card-left">{left}</span>}
             </p>
           </div>
           {!entry.up_next && <ProgressBar position={entry.position} duration={entry.duration} />}
@@ -52,8 +54,8 @@ export const ContinueCard = memo(function ContinueCard({ entry, onRemove }: { en
       <button
         type="button"
         className="save-chip card-remove"
-        aria-label={`${item.title} aus Weiterschauen entfernen`}
-        title="Aus Weiterschauen entfernen"
+        aria-label={t('watch.removeLabel', { title: item.title })}
+        title={t('watch.removeTitle')}
         onClick={onRemove}
       >
         <Icon name="close" size={15} stroke={2.2} />
@@ -62,19 +64,24 @@ export const ContinueCard = memo(function ContinueCard({ entry, onRemove }: { en
   )
 })
 
-/** "Neue Folgen deiner Serien": the first unseen new episode of a series. */
+/** "New episodes of your shows": the first unseen new episode of a series. */
 export const NewEpisodeCard = memo(function NewEpisodeCard({ ep }: { ep: NewEpisode }) {
+  const { t } = useI18n()
   const code = epCode(ep.season, ep.episode)
   const date = formatDate(ep.air_date)
   return (
     <article className="card card-wide card-watch">
-      <Link to={playPath('tv', ep.item.id, ep.season, ep.episode)} className="card-link" aria-label={`${ep.item.title}, ${code} abspielen`}>
+      <Link
+        to={playPath('tv', ep.item.id, ep.season, ep.episode)}
+        className="card-link"
+        aria-label={t('watch.playEpisode', { title: ep.item.title, code: code ?? '' })}
+      >
         <div className="card-poster">
           <Art src={ep.item.backdrop ?? ep.still} alt="" />
           <span className="card-watch-play" aria-hidden="true">
             <Icon name="play" size={20} />
           </span>
-          <span className="card-new">{ep.count > 1 ? `${ep.count} neue Folgen` : 'Neue Folge'}</span>
+          <span className="card-new">{t('watch.newCount', { n: ep.count })}</span>
           <div className="card-wide-text">
             <h3 className="card-title">{ep.item.title}</h3>
             <p className="card-meta">

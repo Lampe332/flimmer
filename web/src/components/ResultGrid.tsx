@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useI18n } from '../i18n'
 import type { Item } from '../lib/api'
 import PosterCard from './PosterCard'
 import { CardSkeletons } from './States'
@@ -12,11 +13,12 @@ type Props = {
   showType?: boolean
 }
 
-/** Poster grid with auto-loading sentinel plus an explicit "Mehr laden" button. */
+/** Poster grid with auto-loading sentinel plus an explicit "load more" button. */
 export default function ResultGrid({ items, loading, hasMore, loadingMore, onMore, showType }: Props) {
   const sentinel = useRef<HTMLDivElement>(null)
   const more = useRef(onMore)
   more.current = onMore
+  const { t } = useI18n()
 
   useEffect(() => {
     const el = sentinel.current
@@ -53,7 +55,7 @@ export default function ResultGrid({ items, loading, hasMore, loadingMore, onMor
       {hasMore && !loading && (
         <div className="grid-more" ref={sentinel}>
           <button type="button" className="btn btn-glass" onClick={onMore} disabled={loadingMore}>
-            {loadingMore ? 'Lädt …' : 'Mehr laden'}
+            {loadingMore ? t('grid.loading') : t('grid.more')}
           </button>
         </div>
       )}

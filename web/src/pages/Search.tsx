@@ -2,13 +2,15 @@ import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router'
 import ResultGrid from '../components/ResultGrid'
 import { EmptyState, ErrorState } from '../components/States'
+import { useI18n } from '../i18n'
 import { api } from '../lib/api'
 import { useTitle } from '../lib/title'
 
 export default function Search() {
+  const { t } = useI18n()
   const [params] = useSearchParams()
   const q = (params.get('q') ?? '').trim()
-  useTitle(q ? `Suche: ${q}` : 'Suche')
+  useTitle(q ? t('search.tab', { q }) : t('nav.search'))
 
   const res = useInfiniteQuery({
     queryKey: ['search', q],
@@ -25,16 +27,16 @@ export default function Search() {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1 className="page-title">{q ? `„${q}“` : 'Suche'}</h1>
-          {q && <p className="page-sub">Filme und Serien zu deiner Suche</p>}
+          <h1 className="page-title">{q ? t('search.quoted', { q }) : t('nav.search')}</h1>
+          {q && <p className="page-sub">{t('search.sub')}</p>}
         </div>
       </div>
       {!q ? (
-        <EmptyState icon="search" title="Wonach suchst du?" text="Tipp oben einen Film- oder Serientitel ein. Mit / springst du jederzeit ins Suchfeld." />
+        <EmptyState icon="search" title={t('search.emptyTitle')} text={t('search.emptyText')} />
       ) : res.error ? (
         <ErrorState error={res.error} onRetry={() => void res.refetch()} />
       ) : !res.isPending && !res.isPlaceholderData && items.length === 0 ? (
-        <EmptyState icon="search" title="Nichts gefunden" text={`Zu „${q}“ gibt es keine Filme oder Serien. Prüf die Schreibweise oder versuch den Originaltitel.`} />
+        <EmptyState icon="search" title={t('search.noneTitle')} text={t('search.noneText', { q })} />
       ) : (
         <ResultGrid
           items={items}

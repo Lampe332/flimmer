@@ -18,6 +18,7 @@ import {
   type ScanResult,
   type Settings,
 } from '../lib/api'
+import { useI18n } from '../i18n'
 import { formatDate, formatHeight, isUpcoming } from '../lib/format'
 import { rank } from '../lib/pick'
 import { invalidateWatching, neighbour, resumeTarget, useProgress, type Ep } from '../lib/progress'
@@ -70,6 +71,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const resume = useRef(0)
   const [hintDone, setHintDone] = useState(false)
   const retried = useRef(new Set<string>())
+  const { t } = useI18n()
 
   const details = useQuery({ queryKey: ['title', type, id], queryFn: () => api.title(type, id) })
   const season = useQuery({ queryKey: ['season', id, s], queryFn: () => api.season(id, s), enabled: isTv })
@@ -116,9 +118,9 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const results: ScanResult[] = useMemo(
     () =>
       (scan?.results ?? []).map((r) =>
-        dead.has(r.provider_id) ? { ...r, status: 'error', error: 'Stream abgelaufen', stream_id: null } : r,
+        dead.has(r.provider_id) ? { ...r, status: 'error', error: t('player.expired'), stream_id: null } : r,
       ),
-    [scan, dead],
+    [scan, dead, t],
   )
   const shownScan = scan ? { ...scan, results } : undefined
   const ranked = useMemo(() => rank(results, settings.filter), [results, settings.filter])
@@ -169,10 +171,10 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const others = ranked.filter((r) => r.provider_id !== active?.provider_id).length
   const fallback =
     others > 0
-      ? { label: 'Andere Quelle', run: onFailed }
+      ? { label: t('player.otherSource'), run: onFailed }
       : sniffer
         ? {
-            label: 'Quellen neu suchen',
+            label: t('player.rescan'),
             run: () => {
               setDead(new Set())
               setManual(null)
@@ -221,7 +223,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
       .catch(() => undefined)
   }
   const go = (to: Ep) => navigate(playPath('tv', id, to.s, to.e), { replace: true })
-  const epLabel = isTv ? `Staffel ${s}, Folge ${e}` : undefined
+  const epLabel = isTv ? t('player.episodeLabel', { s, e }) : undefined
   const checked = results.filter((r) => r.status !== 'pending' && r.status !== 'running').length
 
   return (
@@ -230,8 +232,8 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
         <Link
           to={titlePath({ type, id })}
           className="back-link"
-          aria-label="Zurück"
-          title="Zurück"
+          aria-label={t('player.back')}
+          title={t('player.back')}
           onClick={(ev) => {
             // Came here from inside Flimmer: go back to exactly that page (and its scroll position).
             if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) {
@@ -259,8 +261,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
             <p className="app-note">
               <Icon name="app" size={18} />
               <span>
-                <strong>Quellen-Prüfung nur in der Flimmer-App.</strong> Im Browser spielt Flimmer bereits geprüfte Quellen ab,
-                neue findet nur die App.
+                <strong>{t('player.browserNoteStrong')}</strong> {t('player.browserNote')}
               </span>
             </p>
           )}
@@ -284,7 +285,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                 next={
                   nextPlayable
                     ? {
-                        label: `Staffel ${nextPlayable.s}, Folge ${nextPlayable.e}`,
+                        label: t('player.episodeLabel', { s: nextPlayable.s, e: nextPlayable.e }),
                         name: nextEp?.name,
                         still: nextEp?.still,
                         go: () => go(nextPlayable),
@@ -299,27 +300,27 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                   {scanError ? (
                     <ErrorState error={scanError} onRetry={() => (sniffer ? startScan({}) : void scanQ.refetch())} />
                   ) : !scan || !caps.isFetched ? (
-                    <Flicker size={52} label="Quellen werden geladen" />
+                    <Flicker size={52} label={t('player.loadingSources')} />
                   ) : running ? (
                     <>
                       <Flicker size={52} />
-                      <h2>{best ? 'Quelle gefunden' : early ? 'Suche läuft noch' : 'Suche die beste Quelle …'}</h2>
+                      <h2>{best ? t('player.found') : early ? t('player.stillSearching') : t('player.searching')}</h2>
                       <p>
                         {best
-                          ? `Es geht in ${Math.max(1, EARLY_S - waited)} s los. Findet Flimmer bis dahin etwas Besseres, nimmt es das.`
+                          ? t('player.foundText', { n: Math.max(1, EARLY_S - waited) })
                           : early
-                            ? 'Bisher hat kein Anbieter geantwortet. Flimmer sucht weiter und startet, sobald etwas da ist. Das kann bis zu 2 Minuten dauern.'
-                            : 'Flimmer fragt gerade alle Anbieter. Du musst nichts tun, das Video startet von selbst.'}
+                            ? t('player.earlyText')
+                            : t('player.searchingText')}
                       </p>
                       {results.length > 0 && (
                         <span
                           className="scan-meter"
                           role="progressbar"
-                          aria-label="Suche"
+                          aria-label={t('player.meter')}
                           aria-valuemin={0}
                           aria-valuemax={results.length}
                           aria-valuenow={checked}
-                          aria-valuetext={`${checked} von ${results.length} Anbietern geprüft`}
+                          aria-valuetext={t('player.meterText', { n: checked, total: results.length })}
                         >
                           <span style={{ transform: `scaleX(${checked / results.length})` }} />
                         </span>
@@ -327,7 +328,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       {best && (
                         <button type="button" className="btn btn-primary" onClick={() => setLocked(best.provider_id)}>
                           <Icon name="play" size={16} />
-                          Sofort starten
+                          {t('player.startNow')}
                           {formatHeight(best.max_height) && <span className="btn-note">{formatHeight(best.max_height)}</span>}
                         </button>
                       )}
@@ -337,15 +338,11 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       <span className="state-icon">
                         <Icon name="app" size={26} />
                       </span>
-                      <h2>Quellen-Prüfung nur in der Flimmer-App</h2>
-                      <p>
-                        Im Browser kann Flimmer keine Streams aufspüren. Öffne diesen Titel in der Flimmer-App, dort werden
-                        alle Quellen geprüft und die beste startet von selbst. Was die App schon gefunden hat, läuft danach
-                        auch hier.
-                      </p>
+                      <h2>{t('player.appOnly')}</h2>
+                      <p>{t('player.appOnlyText')}</p>
                       <Link to={titlePath({ type, id })} className="btn btn-glass">
                         <Icon name="left" size={16} />
-                        Zurück zum Titel
+                        {t('player.backToTitle')}
                       </Link>
                     </>
                   ) : (
@@ -353,15 +350,11 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       <span className="state-icon is-warn">
                         <Icon name="warn" size={26} />
                       </span>
-                      <h2>Keine Quelle spielbar</h2>
-                      <p>
-                        {results.length > 0
-                          ? 'Kein Anbieter hat gerade einen Stream für diesen Titel geliefert. Das ändert sich oft nach ein paar Minuten.'
-                          : 'Für diesen Titel sind keine Anbieter eingetragen.'}
-                      </p>
+                      <h2>{t('player.none')}</h2>
+                      <p>{results.length > 0 ? t('player.noneText') : t('player.noProviders')}</p>
                       <button type="button" className="btn btn-primary" onClick={() => startScan({ force: true })}>
                         <Icon name="refresh" size={16} />
-                        Noch einmal suchen
+                        {t('player.searchAgain')}
                       </button>
                     </>
                   )}
@@ -374,10 +367,10 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
             <div className="ep-nav">
               <button type="button" className="btn btn-glass" disabled={!prev} onClick={() => prev && go(prev)}>
                 <Icon name="left" size={16} />
-                Vorherige Folge
+                {t('player.prevEpisode')}
               </button>
               <button type="button" className="btn btn-glass" disabled={!next} onClick={() => next && go(next)}>
-                Nächste Folge
+                {t('player.nextEpisode')}
                 <Icon name="right" size={16} />
               </button>
             </div>
@@ -388,7 +381,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
               <>
                 {isTv && (
                   <h2 className="now-ep">
-                    {episode ? `${e}. ${episode.name}` : `Folge ${e}`}
+                    {episode ? `${e}. ${episode.name}` : t('player.episodeN', { e })}
                     {episode?.air_date && <span className="now-date">{formatDate(episode.air_date)}</span>}
                   </h2>
                 )}
@@ -419,9 +412,9 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
       </div>
 
       {isTv && seasons.length > 0 && (
-        <section className="detail-section" aria-label="Folge wählen">
+        <section className="detail-section" aria-label={t('player.pickEpisode')}>
           <div className="section-head">
-            <h2 className="row-title">Folgen</h2>
+            <h2 className="row-title">{t('player.episodes')}</h2>
             <SeasonTabs seasons={seasons} value={viewSeason} onChange={setViewSeason} />
           </div>
           <EpisodeList tvId={id} season={viewSeason} current={viewSeason === s ? e : undefined} compact series={d} />

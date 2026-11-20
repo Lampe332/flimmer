@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
+import { useI18n } from '../i18n'
 import { api, playStartPath, titlePath, type Item } from '../lib/api'
 import { formatRating, typeLabel } from '../lib/format'
 import Icon from './Icon'
@@ -17,13 +18,14 @@ function useWarm(item: Item) {
 
 /** Round play button in the middle of the artwork: straight to the player, skipping the title page. */
 function PlayChip({ item }: { item: Item }) {
+  const { t } = useI18n()
   return (
     <span className="card-play-area">
       <Link
         to={playStartPath(item)}
         className="card-play"
-        aria-label={`${item.title} abspielen`}
-        title={item.type === 'tv' ? 'Abspielen (weiter, wo du warst)' : 'Abspielen'}
+        aria-label={t('card.play', { title: item.title })}
+        title={item.type === 'tv' ? t('card.playTv') : t('common.play')}
       >
         <Icon name="play" size={20} />
       </Link>
@@ -32,6 +34,7 @@ function PlayChip({ item }: { item: Item }) {
 }
 
 function PosterCard({ item, showType }: Props) {
+  const { t } = useI18n()
   const rating = formatRating(item.rating)
   const warm = useWarm(item)
   return (
@@ -46,7 +49,7 @@ function PosterCard({ item, showType }: Props) {
             </div>
           )}
           {rating && (
-            <span className="card-rating" aria-label={`Bewertung ${rating}`}>
+            <span className="card-rating" aria-label={t('card.rating', { r: rating })}>
               <Icon name="star" size={11} />
               {rating}
             </span>
@@ -54,7 +57,7 @@ function PosterCard({ item, showType }: Props) {
         </div>
         <h3 className="card-title">{item.title}</h3>
         <p className="card-meta">
-          <span>{item.year ?? 'Jahr unbekannt'}</span>
+          <span>{item.year ?? t('card.noYear')}</span>
           {showType && <span className="card-type">{typeLabel(item.type)}</span>}
         </p>
       </Link>
@@ -68,6 +71,7 @@ export default memo(PosterCard)
 
 /** Landscape card on the backdrop, used for the trending shelf. */
 export const WideCard = memo(function WideCard({ item }: { item: Item }) {
+  useI18n() // re-render on a language switch (type label, number format)
   const rating = formatRating(item.rating)
   const warm = useWarm(item)
   return (

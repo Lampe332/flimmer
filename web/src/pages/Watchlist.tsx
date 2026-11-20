@@ -1,21 +1,21 @@
 import { Link } from 'react-router'
 import PosterCard from '../components/PosterCard'
 import { CardSkeletons, EmptyState, ErrorState } from '../components/States'
+import { useI18n } from '../i18n'
 import { useTitle } from '../lib/title'
 import { useWatchlist } from '../lib/watchlist'
 
 export default function Watchlist() {
+  const { t } = useI18n()
   const { data, isPending, error, refetch } = useWatchlist()
-  useTitle('Merkliste')
+  useTitle(t('nav.watchlist'))
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1 className="page-title">Merkliste</h1>
-          {data && data.length > 0 && (
-            <p className="page-sub">{data.length === 1 ? '1 Titel für später' : `${data.length} Titel für später`}</p>
-          )}
+          <h1 className="page-title">{t('nav.watchlist')}</h1>
+          {data && data.length > 0 && <p className="page-sub">{t('wl.count', { n: data.length })}</p>}
         </div>
       </div>
       {error ? (
@@ -25,12 +25,12 @@ export default function Watchlist() {
           <CardSkeletons count={12} />
         </div>
       ) : data.length === 0 ? (
-        <EmptyState icon="bookmark" title="Deine Merkliste ist leer" text="Merk dir Filme und Serien mit dem Plus auf einem Poster oder mit „Merken“ auf der Titelseite.">
+        <EmptyState icon="bookmark" title={t('wl.emptyTitle')} text={t('wl.emptyText')}>
           <Link to="/filme" className="btn btn-primary">
-            Filme entdecken
+            {t('wl.discoverMovies')}
           </Link>
           <Link to="/serien" className="btn btn-glass">
-            Serien entdecken
+            {t('wl.discoverTv')}
           </Link>
         </EmptyState>
       ) : (

@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n'
 import type { Item } from '../lib/api'
 import { useWatchToggle } from '../lib/watchlist'
 import Icon from './Icon'
@@ -6,6 +7,7 @@ type Props = { item: Item; variant?: 'button' | 'chip' | 'round' }
 
 export default function SaveButton({ item, variant = 'button' }: Props) {
   const { saved, toggle } = useWatchToggle(item)
+  const { t } = useI18n()
 
   if (variant === 'button') {
     return (
@@ -14,7 +16,7 @@ export default function SaveButton({ item, variant = 'button' }: Props) {
           <Icon name="plus" size={18} />
           <Icon name="check" size={18} />
         </span>
-        {saved ? 'Gemerkt' : 'Merken'}
+        {saved ? t('save.saved') : t('save.save')}
       </button>
     )
   }
@@ -24,8 +26,8 @@ export default function SaveButton({ item, variant = 'button' }: Props) {
       type="button"
       className={`${variant === 'chip' ? 'save-chip' : 'btn-round'}${saved ? ' is-saved' : ''}`}
       aria-pressed={saved}
-      aria-label={saved ? `${item.title} von der Merkliste entfernen` : `${item.title} merken`}
-      title={saved ? 'Von der Merkliste entfernen' : 'Merken'}
+      aria-label={saved ? t('save.removeLabel', { title: item.title }) : t('save.addLabel', { title: item.title })}
+      title={saved ? t('save.removeTitle') : t('save.save')}
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()

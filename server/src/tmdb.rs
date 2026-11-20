@@ -17,6 +17,21 @@ pub const TTL_TITLE: Duration = Duration::from_secs(24 * 60 * 60);
 /// TV details / seasons for "Weiterschauen" and "Neue Folgen": new episodes show up within 6 h.
 pub const TTL_SHOW: Duration = Duration::from_secs(6 * 60 * 60);
 
+tokio::task_local! {
+    /// TMDB language of the current request (`?lang=`), set by the API middleware.
+    pub static REQUEST_LANG: String;
+}
+
+/// Accepts `xx` or `xx-YY` (ISO 639-1, optional ISO 3166-1 region), e.g. `de-DE`, `en-US`.
+pub fn valid_language(s: &str) -> bool {
+    let b = s.as_bytes();
+    match b.len() {
+        2 => b.iter().all(u8::is_ascii_lowercase),
+        5 => b[..2].iter().all(u8::is_ascii_lowercase) && b[2] == b'-' && b[3..].iter().all(u8::is_ascii_uppercase),
+        _ => false,
+    }
+}
+
 /// Thin TMDB v3 client with a small in-memory TTL cache.
 /// The bearer token is only ever placed in the Authorization header.
 pub struct Tmdb {
@@ -37,10 +52,16 @@ impl Tmdb {
         Self { http, token, language, region, cache: Mutex::new(HashMap::new()) }
     }
 
+    /// The request's language (`?lang=`), else `config.language`.
+    pub fn language(&self) -> String {
+        REQUEST_LANG.try_with(Clone::clone).unwrap_or_else(|_| self.language.clone())
+    }
+
     /// GET `path` with `language` plus `params`. `ttl = None` bypasses the cache.
+    /// The language is part of the cache key, so each language is cached separately.
     pub async fn get(&self, path: &str, params: &[(&str, String)], ttl: Option<Duration>) -> ApiResult<Value> {
         let mut query: Vec<(&str, String)> = Vec::with_capacity(params.len() + 1);
-        query.push(("language", self.language.clone()));
+        query.push(("language", self.language()));
         query.extend(params.iter().cloned());
 
         let key = format!(
@@ -93,5 +114,28 @@ impl Tmdb {
     /// True if the token is accepted by TMDB.
     pub async fn check(&self) -> bool {
         self.get("/configuration", &[], None).await.is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn language_codes() {
+        for ok in ["de", "en", "de-DE", "en-US"] {
+            assert!(valid_language(ok), "{ok}");
+        }
+        for bad in ["", "e", "EN", "en_US", "en-us", "english", "de-DE&x=1"] {
+            assert!(!valid_language(bad), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn request_language_overrides_config() {
+        let t = Tmdb::new(String::new(), "de-DE".into(), "DE".into());
+        assert_eq!(t.language(), "de-DE");
+        let inner = REQUEST_LANG.scope("en-US".into(), async { t.language() }).await;
+        assert_eq!(inner, "en-US");
     }
 }

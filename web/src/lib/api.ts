@@ -1,3 +1,5 @@
+import { getLang, localeOf, t } from '../i18n'
+
 export type MediaType = 'movie' | 'tv'
 
 export interface Item {
@@ -148,7 +150,7 @@ export interface Progress {
   updated_at: string
 }
 
-/** What a progress save / "gesehen" mark carries along so lists render without TMDB calls. */
+/** What a progress save / "watched" mark carries along so lists render without TMDB calls. */
 export interface WatchMeta {
   item: Item
   episode_name?: string | null
@@ -202,15 +204,17 @@ export class ApiError extends Error {
   }
 }
 
+/** Every call carries the UI language, so TMDB titles, overviews, episodes and genres come back in it. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const lang = `lang=${localeOf(getLang())}`
   let res: Response
   try {
-    res = await fetch(`/api${path}`, init)
+    res = await fetch(`/api${path}${path.includes('?') ? '&' : '?'}${lang}`, init)
   } catch {
-    throw new ApiError(0, 'Der Flimmer-Server ist nicht erreichbar.')
+    throw new ApiError(0, t('api.offline'))
   }
   if (!res.ok) {
-    let message = `Fehler ${res.status}`
+    let message = t('api.status', { status: res.status })
     try {
       const body = (await res.json()) as { error?: string }
       if (body.error) message = body.error

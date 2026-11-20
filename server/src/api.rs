@@ -73,6 +73,23 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .with_state(state)
+        .layer(axum::middleware::from_fn(request_language))
+}
+
+/// `?lang=xx-YY` on any `/api` call sets the TMDB language for that request
+/// (titles, overviews, episode names, genres). Without it, `config.language` applies.
+async fn request_language(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let lang = req
+        .uri()
+        .query()
+        .and_then(|q| url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == "lang"))
+        .map(|(_, v)| v.into_owned());
+    match lang {
+        None => next.run(req).await,
+        Some(l) if crate::tmdb::valid_language(&l) => crate::tmdb::REQUEST_LANG.scope(l, next.run(req)).await,
+        Some(_) => ApiError::bad_request("'lang' must look like 'de-DE' or 'en-US'").into_response(),
+    }
 }
 
 // ---------- validation ----------
@@ -196,12 +213,16 @@ async fn search(State(st): St, Query(q): Params) -> ApiResult<Json<Page>> {
 async fn title(State(st): St, Path((ty, id)): Path<(String, String)>) -> ApiResult<Json<Details>> {
     let kind = media_type(&ty)?;
     let id = numeric_id(&id)?;
+    // Trailers: the request's language first, the other of de/en as fallback.
+    let lang = st.tmdb.language();
+    let primary = lang.get(..2).unwrap_or("de").to_owned();
+    let fallback = if primary == "en" { "de" } else { "en" };
     let params = [
         ("append_to_response", "external_ids,videos,credits,recommendations".to_owned()),
-        ("include_video_language", "de,en".to_owned()),
+        ("include_video_language", format!("{primary},{fallback}")),
     ];
     let v = st.tmdb.get(&format!("/{}/{id}", kind.as_str()), &params, Some(TTL_TITLE)).await?;
-    model::details_from(&v, kind)
+    model::details_from(&v, kind, &primary)
         .map(Json)
         .ok_or_else(|| ApiError::bad_gateway("TMDB returned incomplete data"))
 }

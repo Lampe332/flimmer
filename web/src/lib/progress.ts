@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { t } from '../i18n'
 import { api, type HistoryEntry, type MediaType, type Progress, type Season, type WatchMeta } from './api'
 
 export type Ep = { s: number; e: number }
@@ -65,11 +66,11 @@ export function epCode(s: number | null, e: number | null): string | null {
   return s === null || e === null ? null : `S${s}E${e}`
 }
 
-/** "noch 34 Min." */
+/** "noch 34 Min." / "34 min left" */
 export function remaining(position: number, duration: number): string | null {
   if (duration <= 0) return null
   const min = Math.max(1, Math.round((duration - position) / 60))
-  return `noch ${min} Min.`
+  return t('fmt.left', { m: min })
 }
 
 export function ratio(position: number, duration: number): number {
@@ -78,7 +79,7 @@ export function ratio(position: number, duration: number): number {
 
 type Mark = { s: number; e: number; watched: boolean; meta: WatchMeta }
 
-/** "Als gesehen markieren" / "Ungesehen" for one episode, optimistic. */
+/** Mark one episode watched / not watched, optimistic. */
 export function useMarkEpisode(id: number) {
   const qc = useQueryClient()
   const key = progressKey('tv', id)

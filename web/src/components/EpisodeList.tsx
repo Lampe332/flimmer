@@ -1,18 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
+import { useI18n } from '../i18n'
 import { api, playPath, type Item } from '../lib/api'
 import { formatDate, isUpcoming } from '../lib/format'
 import { ratio, remaining, useMarkEpisode, useProgress } from '../lib/progress'
 import Icon from './Icon'
 import { ErrorState } from './States'
 
-/** `series` enables the "gesehen" toggle (it is stored with the mark). */
+/** `series` enables the "watched" toggle (it is stored with the mark). */
 type Props = { tvId: number; season: number; current?: number; compact?: boolean; series?: Item }
 
 export default function EpisodeList({ tvId, season, current, compact, series }: Props) {
   const q = useQuery({ queryKey: ['season', tvId, season], queryFn: () => api.season(tvId, season) })
   const progress = useProgress('tv', tvId)
   const mark = useMarkEpisode(tvId)
+  const { t } = useI18n()
 
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
 
@@ -33,7 +35,7 @@ export default function EpisodeList({ tvId, season, current, compact, series }: 
   }
 
   if (q.data.episodes.length === 0) {
-    return <p className="page-note">Für diese Staffel sind noch keine Folgen eingetragen.</p>
+    return <p className="page-note">{t('ep.none')}</p>
   }
 
   return (
@@ -71,12 +73,12 @@ export default function EpisodeList({ tvId, season, current, compact, series }: 
                   {ep.name}
                 </h3>
                 <p className="episode-meta">
-                  {upcoming ? `Erscheint am ${date ?? 'unbekannten Datum'}` : date}
-                  {ep.runtime ? `, ${ep.runtime} Min.` : ''}
+                  {upcoming ? t('ep.airs', { date: date ?? t('ep.unknownDate') }) : date}
+                  {ep.runtime ? `, ${t('fmt.m', { m: ep.runtime })}` : ''}
                   {seen && (
                     <span className="episode-state is-seen">
                       <Icon name="check" size={13} stroke={2.4} />
-                      Gesehen
+                      {t('ep.seen')}
                     </span>
                   )}
                   {started && <span className="episode-state">{remaining(p.position, p.duration)}</span>}
@@ -89,8 +91,8 @@ export default function EpisodeList({ tvId, season, current, compact, series }: 
                 type="button"
                 className={`episode-mark${seen ? ' is-seen' : ''}`}
                 aria-pressed={seen}
-                aria-label={seen ? `Folge ${ep.episode_number} als ungesehen markieren` : `Folge ${ep.episode_number} als gesehen markieren`}
-                title={seen ? 'Ungesehen' : 'Als gesehen markieren'}
+                aria-label={t(seen ? 'ep.markUnseenLabel' : 'ep.markSeenLabel', { n: ep.episode_number })}
+                title={seen ? t('ep.unseen') : t('ep.markSeen')}
                 onClick={() =>
                   mark.mutate({
                     s: season,

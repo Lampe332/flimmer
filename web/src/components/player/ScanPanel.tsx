@@ -1,3 +1,4 @@
+import { useI18n, type Key, type T } from '../../i18n'
 import type { AudioLang, Filter, MinHeight, Scan, ScanResult, Settings, SortKey } from '../../lib/api'
 import { formatBitrate, formatHeight, formatMs, langCode } from '../../lib/format'
 import { fit, rank } from '../../lib/pick'
@@ -19,38 +20,41 @@ type Props = {
   onRescan: () => void
 }
 
-const HEIGHTS: { value: MinHeight; label: string }[] = [
-  { value: 0, label: 'Egal' },
-  { value: 480, label: 'ab 480p' },
-  { value: 720, label: 'ab 720p' },
-  { value: 1080, label: 'ab 1080p' },
-  { value: 2160, label: 'nur 4K' },
+const heights = (t: T): { value: MinHeight; label: string }[] => [
+  { value: 0, label: t('scan.any') },
+  { value: 480, label: t('scan.from', { h: '480p' }) },
+  { value: 720, label: t('scan.from', { h: '720p' }) },
+  { value: 1080, label: t('scan.from', { h: '1080p' }) },
+  { value: 2160, label: t('scan.only4k') },
 ]
-const LANGS: { value: AudioLang; label: string }[] = [
-  { value: 'any', label: 'Egal' },
-  { value: 'de', label: 'Deutsch' },
-  { value: 'en', label: 'Englisch' },
+const langs = (t: T): { value: AudioLang; label: string }[] => [
+  { value: 'any', label: t('scan.any') },
+  { value: 'de', label: t('lang.de') },
+  { value: 'en', label: t('lang.en') },
 ]
-const SORTS: { value: SortKey; label: string; hint: string }[] = [
-  { value: 'quality', label: 'Schärfe', hint: 'Die höchste Auflösung gewinnt.' },
-  { value: 'bitrate', label: 'Datenrate', hint: 'Die meisten Bilddaten pro Sekunde gewinnen, oft das ruhigste Bild.' },
-  { value: 'speed', label: 'Schneller Start', hint: 'Die Quelle, die am schnellsten geantwortet hat, gewinnt.' },
+const SORTS: { value: SortKey; label: Key; hint: Key }[] = [
+  { value: 'quality', label: 'scan.sortQuality', hint: 'scan.sortQualityHint' },
+  { value: 'bitrate', label: 'scan.sortBitrate', hint: 'scan.sortBitrateHint' },
+  { value: 'speed', label: 'scan.sortSpeed', hint: 'scan.sortSpeedHint' },
 ]
 const PREFETCH = [5, 10, 20, 30]
 
 const ORDER: Record<ScanResult['status'], number> = { ok: 0, running: 1, pending: 2, no_stream: 3, error: 4 }
 
 /** One line for the closed filter box, e.g. "ab 1080p · Deutsch · Schärfe". */
-function summary(f: Filter): string {
-  const h = HEIGHTS.find((x) => x.value === f.min_height)
-  const l = LANGS.find((x) => x.value === f.audio_lang)
+function summary(f: Filter, t: T): string {
+  const h = heights(t).find((x) => x.value === f.min_height)
+  const l = langs(t).find((x) => x.value === f.audio_lang)
   const s = SORTS.find((x) => x.value === f.sort)
-  return [f.min_height ? h?.label : 'jede Qualität', f.audio_lang === 'any' ? 'jede Sprache' : l?.label, s?.label]
+  return [f.min_height ? h?.label : t('scan.anyQuality'), f.audio_lang === 'any' ? t('scan.anyLanguage') : l?.label, s && t(s.label)]
     .filter(Boolean)
     .join(' · ')
 }
 
 export default function ScanPanel(p: Props) {
+  const { t } = useI18n()
+  const HEIGHTS = heights(t)
+  const LANGS = langs(t)
   const { filter } = p.settings
   const results = p.scan?.results ?? []
   const ranked = rank(results, filter)
@@ -60,46 +64,45 @@ export default function ScanPanel(p: Props) {
   const running = p.scan?.state === 'running'
   const setFilter = (patch: Partial<Filter>) => p.onSettings({ ...p.settings, filter: { ...filter, ...patch } })
   const minutes = PREFETCH.includes(p.settings.prefetch_minutes) ? PREFETCH : [...PREFETCH, p.settings.prefetch_minutes].sort((a, z) => a - z)
-  const found = ranked.length === 1 ? '1 gefunden' : `${ranked.length} gefunden`
-  const sortHint = SORTS.find((s) => s.value === filter.sort)?.hint
+  const found = t('scan.found', { n: ranked.length })
+  const sortHintKey = SORTS.find((s) => s.value === filter.sort)?.hint
+  const sortHint = sortHintKey && t(sortHintKey)
 
-  let state = 'Noch nicht gesucht'
-  if (p.loading) state = 'Lädt'
-  else if (running) state = `Suche läuft · ${found}`
-  else if (results.length > 0) state = ranked.length === 1 ? '1 Quelle spielbar' : `${ranked.length} Quellen spielbar`
+  let state = t('scan.notYet')
+  if (p.loading) state = t('common.loading')
+  else if (running) state = t('scan.running', { found })
+  else if (results.length > 0) state = t('scan.playable', { n: ranked.length })
 
   return (
-    <aside className="scan" aria-label="Quellen">
+    <aside className="scan" aria-label={t('scan.title')}>
       <header className="scan-head">
-        <h2 className="scan-title">Quellen</h2>
+        <h2 className="scan-title">{t('scan.title')}</h2>
         <p className={`scan-state${running ? ' is-running' : ''}`} role="status">
           {running && <span className="bars" aria-hidden="true" />}
           {state}
         </p>
         {p.sniffer && (
-          <button type="button" className="icon-btn" onClick={p.onRescan} disabled={running} aria-label="Quellen neu suchen" title="Quellen neu suchen">
+          <button type="button" className="icon-btn" onClick={p.onRescan} disabled={running} aria-label={t('player.rescan')} title={t('player.rescan')}>
             <Icon name="refresh" size={17} />
           </button>
         )}
       </header>
       <p className="scan-intro">
-        {p.sniffer
-          ? 'Flimmer fragt alle Anbieter und spielt die beste Quelle von selbst. Klick eine andere an, wenn es ruckelt.'
-          : 'Hier stehen die Quellen, die die Flimmer-App schon gefunden hat. Klick eine an, um sie zu spielen.'}
+        {p.sniffer ? t('scan.introApp') : t('scan.introBrowser')}
       </p>
 
       <details className="filters-box">
         <summary className="filters-summary">
           <Icon name="sliders" size={16} />
           <span className="filters-summary-text">
-            <span className="filters-summary-label">Automatische Auswahl</span>
-            <span className="filters-summary-value">{summary(filter)}</span>
+            <span className="filters-summary-label">{t('scan.auto')}</span>
+            <span className="filters-summary-value">{summary(filter, t)}</span>
           </span>
           <Icon name="down" size={14} />
         </summary>
-      <div className="filters" role="group" aria-label="Filter für die automatische Auswahl">
+      <div className="filters" role="group" aria-label={t('scan.filterGroup')}>
         <label className="field">
-          <span className="field-label">Mindestqualität</span>
+          <span className="field-label">{t('scan.minQuality')}</span>
           <span className="select">
             <select value={filter.min_height} onChange={(e) => setFilter({ min_height: Number(e.target.value) as MinHeight })}>
               {HEIGHTS.map((h) => (
@@ -112,7 +115,7 @@ export default function ScanPanel(p: Props) {
           </span>
         </label>
         <label className="field">
-          <span className="field-label">Tonspur</span>
+          <span className="field-label">{t('scan.audio')}</span>
           <span className="select">
             <select value={filter.audio_lang} onChange={(e) => setFilter({ audio_lang: e.target.value as AudioLang })}>
               {LANGS.map((l) => (
@@ -125,7 +128,7 @@ export default function ScanPanel(p: Props) {
           </span>
         </label>
         <label className="field">
-          <span className="field-label">Vorladen</span>
+          <span className="field-label">{t('scan.prefetch')}</span>
           <span className="select">
             <select
               value={p.settings.prefetch_minutes}
@@ -133,7 +136,7 @@ export default function ScanPanel(p: Props) {
             >
               {minutes.map((m) => (
                 <option key={m} value={m}>
-                  {m} Min.
+                  {t('fmt.m', { m })}
                 </option>
               ))}
             </select>
@@ -142,7 +145,7 @@ export default function ScanPanel(p: Props) {
         </label>
         <div className="field field-wide">
           <span className="field-label" id="sort-label">
-            Bei Gleichstand zählt
+            {t('scan.tie')}
           </span>
           <div className="seg" role="radiogroup" aria-labelledby="sort-label">
             {SORTS.map((s) => (
@@ -154,19 +157,16 @@ export default function ScanPanel(p: Props) {
                 className="seg-item"
                 onClick={() => setFilter({ sort: s.value })}
               >
-                {s.label}
+                {t(s.label)}
               </button>
             ))}
           </div>
           {sortHint && <p className="field-hint">{sortHint}</p>}
         </div>
-        <p className="field-hint field-wide">
-          Quellen, die nicht passen, bleiben in der Liste und lassen sich weiter anklicken. Vorladen: so viele Minuten legt
-          Flimmer vorab auf die Festplatte, damit nichts ruckelt.
-        </p>
+        <p className="field-hint field-wide">{t('scan.filterNote')}</p>
         {p.saveFailed && (
           <p className="field-error" role="alert">
-            Der Filter konnte nicht gespeichert werden und gilt nur für diese Sitzung.
+            {t('scan.saveFailed')}
           </p>
         )}
       </div>
@@ -175,28 +175,24 @@ export default function ScanPanel(p: Props) {
       {p.manual && best && (
         <button type="button" className="scan-auto" onClick={p.onAuto}>
           <Icon name="bolt" size={15} />
-          Wieder automatisch wählen
+          {t('scan.backToAuto')}
         </button>
       )}
 
       {results.length === 0 ? (
         <p className="scan-empty">
-          {p.loading
-            ? 'Quellen werden geladen.'
-            : p.sniffer
-              ? 'Noch keine Ergebnisse. Die Prüfung startet gleich.'
-              : 'Für diesen Titel liegen keine geprüften Quellen vor.'}
+          {p.loading ? t('scan.loadingList') : p.sniffer ? t('scan.startsSoon') : t('scan.noChecked')}
         </p>
       ) : (
         <ol className="scan-list">
           {ranked.map((r) => {
             const f = fit(r, filter)
             const isActive = r.provider_id === p.active
-            const langs = [...new Set(r.audio.map((a) => langCode(a.lang)).filter((x): x is string => x !== null))]
+            const codes = [...new Set(r.audio.map((a) => langCode(a.lang)).filter((x): x is string => x !== null))]
             const details = [
-              formatBitrate(r.max_bandwidth) && `Datenrate ${formatBitrate(r.max_bandwidth)}`,
-              formatMs(r.ms) && `geantwortet nach ${formatMs(r.ms)}`,
-              r.subtitles.length > 0 && `${r.subtitles.length} Untertitel`,
+              formatBitrate(r.max_bandwidth) && t('scan.bitrate', { v: formatBitrate(r.max_bandwidth) ?? '' }),
+              formatMs(r.ms) && t('scan.answered', { v: formatMs(r.ms) ?? '' }),
+              r.subtitles.length > 0 && t('scan.subsCount', { n: r.subtitles.length }),
             ]
               .filter(Boolean)
               .join(' · ')
@@ -214,44 +210,44 @@ export default function ScanPanel(p: Props) {
                     {isActive ? (
                       <span className="tag tag-live">
                         <span className="bars" aria-hidden="true" />
-                        Läuft
+                        {t('scan.live')}
                       </span>
                     ) : r.provider_id === best ? (
-                      <span className="tag">Beste Wahl</span>
+                      <span className="tag">{t('scan.best')}</span>
                     ) : !(f.height && f.lang) ? (
-                      <span className="tag tag-dim">passt nicht zum Filter</span>
+                      <span className="tag tag-dim">{t('scan.offFilter')}</span>
                     ) : null}
                   </span>
                   <span className="source-facts">
-                    <span className={`fact fact-quality${f.height ? '' : ' is-miss'}`}>{formatHeight(r.max_height) ?? 'Qualität unbekannt'}</span>
-                    {langs.length > 0 && <span className={`fact${f.lang ? '' : ' is-miss'}`}>{langs.slice(0, 4).join(' ')}</span>}
-                    {r.subtitles.length > 0 && <span className="fact">Untertitel</span>}
+                    <span className={`fact fact-quality${f.height ? '' : ' is-miss'}`}>{formatHeight(r.max_height) ?? t('scan.unknownQuality')}</span>
+                    {codes.length > 0 && <span className={`fact${f.lang ? '' : ' is-miss'}`}>{codes.slice(0, 4).join(' ')}</span>}
+                    {r.subtitles.length > 0 && <span className="fact">{t('scan.subs')}</span>}
                   </span>
                 </button>
               </li>
             )
           })}
-          {ranked.length === 0 && running && <li className="scan-empty">Noch keine Quelle gefunden.</li>}
+          {ranked.length === 0 && running && <li className="scan-empty">{t('scan.noneYet')}</li>}
         </ol>
       )}
 
       {waiting.length > 0 && (
         <p className="scan-waiting">
           <span className="bars" aria-hidden="true" />
-          {waiting.length === 1 ? 'Ein Anbieter wird noch gefragt' : `${waiting.length} Anbieter werden noch gefragt`}
+          {t('scan.waiting', { n: waiting.length })}
         </p>
       )}
       {failed.length > 0 && (
         <details className="scan-failed">
           <summary>
-            {failed.length === 1 ? '1 Anbieter ohne Stream' : `${failed.length} Anbieter ohne Stream`}
+            {t('scan.failed', { n: failed.length })}
             <Icon name="down" size={14} />
           </summary>
           <ul>
             {failed.map((r) => (
               <li key={r.provider_id} className={`source is-${r.status}`}>
                 <span className="source-name">{r.name}</span>
-                <span className="fact">{r.status === 'no_stream' ? 'nichts gefunden' : (r.error ?? 'Fehler')}</span>
+                <span className="fact">{r.status === 'no_stream' ? t('scan.nothing') : (r.error ?? t('scan.error'))}</span>
               </li>
             ))}
           </ul>

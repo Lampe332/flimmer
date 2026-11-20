@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
+import { useI18n } from '../i18n'
 import { playStartPath, titlePath, type Item } from '../lib/api'
 import { formatRating, typeLabel } from '../lib/format'
 import Icon from './Icon'
@@ -13,6 +14,7 @@ export default function Hero({ items }: { items: Item[] }) {
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(prefersReducedMotion)
   const [hold, setHold] = useState(false)
+  const { t } = useI18n()
 
   const current = slides[index]
   if (!current) return null
@@ -22,8 +24,8 @@ export default function Hero({ items }: { items: Item[] }) {
   return (
     <section
       className="hero"
-      aria-roledescription="Karussell"
-      aria-label="Gerade angesagt"
+      aria-roledescription={t('hero.carousel')}
+      aria-label={t('hero.label')}
       onMouseEnter={() => setHold(true)}
       onMouseLeave={() => setHold(false)}
       onFocus={() => setHold(true)}
@@ -64,11 +66,11 @@ export default function Hero({ items }: { items: Item[] }) {
         <div className="actions">
           <Link to={playStartPath(current)} className="btn btn-primary btn-lg">
             <Icon name="play" size={18} />
-            Abspielen
+            {t('common.play')}
           </Link>
           <Link to={titlePath(current)} className="btn btn-glass btn-lg">
             <Icon name="info" size={18} />
-            Details
+            {t('common.details')}
           </Link>
           <SaveButton item={current} variant="round" />
         </div>
@@ -83,7 +85,7 @@ export default function Hero({ items }: { items: Item[] }) {
                 className={`hero-pick${i === index ? ' is-active' : ''}`}
                 onClick={() => setIndex(i)}
                 aria-current={i === index}
-                aria-label={`${s.title} zeigen`}
+                aria-label={t('hero.show', { title: s.title })}
               >
                 <span className="hero-pick-thumb">
                   <img src={s.backdrop ?? undefined} alt="" loading="lazy" decoding="async" />
@@ -106,7 +108,7 @@ export default function Hero({ items }: { items: Item[] }) {
           type="button"
           className="icon-btn hero-pause"
           onClick={() => setPaused((p) => !p)}
-          aria-label={paused ? 'Automatischen Wechsel starten' : 'Automatischen Wechsel anhalten'}
+          aria-label={paused ? t('hero.autoStart') : t('hero.autoStop')}
         >
           <Icon name={paused ? 'play' : 'pause'} size={14} />
         </button>

@@ -1,10 +1,12 @@
+import { useI18n } from '../i18n'
 import type { Season } from '../lib/api'
 
 type Props = { seasons: Season[]; value: number; onChange: (n: number) => void }
 
 export default function SeasonTabs({ seasons, value, onChange }: Props) {
+  const { t } = useI18n()
   return (
-    <div className="tabs season-tabs" role="tablist" aria-label="Staffel wählen">
+    <div className="tabs season-tabs" role="tablist" aria-label={t('season.pick')}>
       {seasons.map((s) => (
         <button
           key={s.season_number}

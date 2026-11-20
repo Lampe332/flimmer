@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useI18n } from '../i18n'
 import Icon from './Icon'
 
 type Props = { title: string; children: ReactNode; action?: ReactNode }
@@ -7,6 +8,7 @@ type Props = { title: string; children: ReactNode; action?: ReactNode }
 export default function Row({ title, children, action }: Props) {
   const track = useRef<HTMLDivElement>(null)
   const [edge, setEdge] = useState({ start: true, end: false })
+  const { t } = useI18n()
 
   useEffect(() => {
     const el = track.current
@@ -43,7 +45,7 @@ export default function Row({ title, children, action }: Props) {
             className="icon-btn"
             onClick={() => page(-1)}
             disabled={edge.start}
-            aria-label={`${title}: zurückblättern`}
+            aria-label={t('row.prev', { title })}
           >
             <Icon name="left" size={18} />
           </button>
@@ -52,7 +54,7 @@ export default function Row({ title, children, action }: Props) {
             className="icon-btn"
             onClick={() => page(1)}
             disabled={edge.end}
-            aria-label={`${title}: weiterblättern`}
+            aria-label={t('row.next', { title })}
           >
             <Icon name="right" size={18} />
           </button>

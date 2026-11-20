@@ -4,6 +4,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import Footer from './components/Footer'
 import Header from './components/Header'
 import { PageLoader } from './components/States'
+import { useI18n } from './i18n'
 import Home from './pages/Home'
 
 const Browse = lazy(() => import('./pages/Browse'))
@@ -53,11 +54,13 @@ function ScrollManager() {
 
 export default function App() {
   const { pathname } = useLocation()
+  // Subscribing here re-renders the whole tree on a language switch.
+  const { t } = useI18n()
   const immersive = pathname.startsWith('/play/')
   return (
     <div className={`app${immersive ? ' is-immersive' : ''}`}>
       <a href="#main" className="skip-link">
-        Zum Inhalt springen
+        {t('app.skip')}
       </a>
       <ScrollManager />
       <Header />

@@ -11,7 +11,8 @@ import {
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, streamUrl, type Variant } from '../../lib/api'
-import { formatBitrate, formatClock, formatHeight, trackLabel } from '../../lib/format'
+import { getLang, t as i18nT, useI18n, type Key, type T } from '../../i18n'
+import { formatBitrate, formatClock, formatHeight, langCode, trackLabel } from '../../lib/format'
 import { variantIndex } from '../../lib/pick'
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
 import Icon, { type IconName } from '../Icon'
@@ -41,7 +42,9 @@ type Props = {
 }
 
 type Option = { id: number; label: string; hint?: string }
-type MenuId = 'quality' | 'audio' | 'subs' | 'volume'
+/** A playlist track; its label is built at render time so it follows the UI language. */
+type TrackRef = { id: number; lang: string | null; name: string | null }
+type MenuId = 'quality' | 'audio' | 'subs'
 
 /** iOS Safari ignores video.volume (only muting works); everything Chromium-based honours it. */
 const CAN_SET_VOLUME = (() => {
@@ -54,8 +57,10 @@ const CAN_SET_VOLUME = (() => {
   }
 })()
 const NARROW = '(max-width: 760px)'
+/** Only a real hover keeps the bar up; on touch, :hover latches after a tap. */
+const HOVER_MQ = window.matchMedia('(hover: hover)')
 
-/** True while the viewport is phone-sized (same breakpoint that hides the inline volume slider). */
+/** True while the viewport is phone-sized: the speaker then opens the slider instead of muting. */
 function useNarrow(): boolean {
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches)
   useEffect(() => {
@@ -67,18 +72,19 @@ function useNarrow(): boolean {
   return narrow
 }
 
-function VolumeRange({ value, onChange, large }: { value: number; onChange: (v: number) => void; large?: boolean }) {
+/** Slim slider: a 3px line in the bar, with a hit area as tall as the buttons. */
+function VolumeRange({ value, onChange, t }: { value: number; onChange: (v: number) => void; t: T }) {
   return (
     <input
       type="range"
-      className={`vp-range${large ? ' vp-range-lg' : ''}`}
+      className="vp-range"
       min={0}
       max={1}
       step={0.05}
       value={value}
       onChange={(e) => onChange(Number(e.target.value))}
-      aria-label="Lautstärke"
-      aria-valuetext={`${Math.round(value * 100)} Prozent`}
+      aria-label={t('vp.volume')}
+      aria-valuetext={t('vp.percent', { n: Math.round(value * 100) })}
       style={{ '--fill': `${value * 100}%` } as CSSProperties}
     />
   )
@@ -94,16 +100,18 @@ const HINT_MS = 8000
 /** A second click within this time is a double click (fullscreen), so the first one must not toggle playback. */
 const DBL_MS = 240
 
-const KEYS: [string, string][] = [
-  ['Leertaste / K', 'Abspielen / Pause'],
-  ['← / →', '10 Sekunden zurück / vor'],
-  ['↑ / ↓', 'Lauter / leiser'],
-  ['M', 'Ton aus / an'],
-  ['F / Doppelklick', 'Vollbild'],
-  ['C', 'Untertitel an / aus'],
-  ['N', 'Nächste Folge'],
-  ['?', 'Diese Übersicht'],
+/** Shortcut overview: keys (a text key or the literal keys) and what they do. */
+const KEYS: { id: string; keys: Key | string; what: Key }[] = [
+  { id: 'play', keys: 'vp.keyPlayKeys', what: 'vp.keyPlay' },
+  { id: 'seek', keys: '← / →', what: 'vp.keySeek' },
+  { id: 'volume', keys: '↑ / ↓', what: 'vp.keyVolume' },
+  { id: 'mute', keys: 'M', what: 'vp.keyMute' },
+  { id: 'full', keys: 'vp.keyFullscreenKeys', what: 'vp.fullscreen' },
+  { id: 'subs', keys: 'C', what: 'vp.keySubs' },
+  { id: 'next', keys: 'N', what: 'player.nextEpisode' },
+  { id: 'help', keys: '?', what: 'vp.keyHelp' },
 ]
+type Fatal = 'vp.streamLoad' | 'api.offline' | 'vp.noData' | 'vp.cantPlay' | 'vp.browserCant'
 
 export default function VideoPlayer({
   streamId,
@@ -124,13 +132,14 @@ export default function VideoPlayer({
   const video = useRef<HTMLVideoElement>(null)
   const bar = useRef<HTMLDivElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const pokeRef = useRef<() => void>(() => undefined)
   const qc = useQueryClient()
 
   const [playing, setPlaying] = useState(false)
   const [waiting, setWaiting] = useState(true)
   const [started, setStarted] = useState(false)
   const [ended, setEnded] = useState(false)
-  const [fatal, setFatal] = useState<string | null>(null)
+  const [fatal, setFatal] = useState<Fatal | null>(null)
   const [time, setTime] = useState(startAt)
   const [duration, setDuration] = useState(0)
   const [buffered, setBuffered] = useState<[number, number][]>([])
@@ -139,11 +148,15 @@ export default function VideoPlayer({
   const [levels, setLevels] = useState<Option[]>([])
   const [level, setLevel] = useState(-1)
   const [activeLevel, setActiveLevel] = useState(-1)
-  const [audios, setAudios] = useState<Option[]>([])
+  const [audios, setAudios] = useState<TrackRef[]>([])
   const [audio, setAudio] = useState(-1)
-  const [subs, setSubs] = useState<Option[]>([])
+  const [subs, setSubs] = useState<TrackRef[]>([])
   const [sub, setSub] = useState(-1)
   const [menu, setMenu] = useState<MenuId | null>(null)
+  /** Phones: the slider is folded into the speaker until a tap opens it. */
+  const [volOpen, setVolOpen] = useState(false)
+  const volBox = useRef<HTMLDivElement>(null)
+  const { t } = useI18n()
   const [idle, setIdle] = useState(false)
   const [hover, setHover] = useState<number | null>(null)
   const [scrub, setScrub] = useState<number | null>(null)
@@ -237,9 +250,9 @@ export default function VideoPlayer({
         .then((res) => {
           if (disposed) return
           if (res.status === 410) live.current.onExpired()
-          else setFatal('Der Stream lässt sich nicht laden.')
+          else setFatal('vp.streamLoad')
         })
-        .catch(() => !disposed && setFatal('Der Flimmer-Server ist nicht erreichbar.'))
+        .catch(() => !disposed && setFatal('api.offline'))
     }
 
     if (kind === 'mp4') {
@@ -255,7 +268,7 @@ export default function VideoPlayer({
             .sort((a, z) => z.height - a.height || z.bitrate - a.bitrate)
             .map((l) => ({
               id: l.id,
-              label: formatHeight(l.height) ?? formatBitrate(l.bitrate) ?? `Variante ${l.id + 1}`,
+              label: formatHeight(l.height) ?? formatBitrate(l.bitrate) ?? i18nT('vp.variant', { n: l.id + 1 }),
               hint: l.height ? (formatBitrate(l.bitrate) ?? undefined) : undefined,
             })),
         )
@@ -266,11 +279,11 @@ export default function VideoPlayer({
         if (el.currentTime > 0 && !el.paused) prefetchRef.current()
       })
       const syncAudio = () => {
-        setAudios(h.audioTracks.map((t, id) => ({ id, label: trackLabel(t, id, 'Tonspur') })))
+        setAudios(h.audioTracks.map((x, id) => ({ id, lang: x.lang ?? null, name: x.name ?? null })))
         setAudio(h.audioTrack)
       }
       const syncSubs = () => {
-        setSubs(h.subtitleTracks.map((t, id) => ({ id, label: trackLabel(t, id, 'Untertitel') })))
+        setSubs(h.subtitleTracks.map((x, id) => ({ id, lang: x.lang ?? null, name: x.name ?? null })))
         setSub(h.subtitleTrack)
       }
       // State mirrors hls.js itself (no optimistic update), so the menu shows what really plays.
@@ -298,11 +311,7 @@ export default function VideoPlayer({
           networkRetries += 1
           h.startLoad()
         } else {
-          setFatal(
-            data.type === Hls.ErrorTypes.NETWORK_ERROR
-              ? 'Die Quelle liefert keine Daten mehr.'
-              : 'Dieses Video lässt sich hier nicht abspielen.',
-          )
+          setFatal(data.type === Hls.ErrorTypes.NETWORK_ERROR ? 'vp.noData' : 'vp.cantPlay')
         }
       })
       h.loadSource(url)
@@ -310,7 +319,7 @@ export default function VideoPlayer({
     } else if (el.canPlayType('application/vnd.apple.mpegurl')) {
       playNative()
     } else {
-      setFatal('Dieser Browser kann den Stream nicht abspielen.')
+      setFatal('vp.browserCant')
     }
     el.addEventListener('error', onNativeError)
 
@@ -336,7 +345,8 @@ export default function VideoPlayer({
       setBuffered(out)
     }
     const on: [keyof HTMLMediaElementEventMap, () => void][] = [
-      ['play', () => (setPlaying(true), setEnded(false))],
+      // Resuming shows the controls for the usual moment instead of hiding them at once.
+      ['play', () => (setPlaying(true), setEnded(false), pokeRef.current())],
       ['pause', () => (setPlaying(false), save())],
       ['waiting', () => setWaiting(true)],
       ['canplay', () => setWaiting(false)],
@@ -383,21 +393,69 @@ export default function VideoPlayer({
     setVolume(vol)
   }, [vol])
 
-  useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === wrap.current)
-    document.addEventListener('fullscreenchange', onChange)
-    return () => document.removeEventListener('fullscreenchange', onChange)
-  }, [])
-
   // ---- controls visibility ----
+  // Shows the controls and hides them IDLE_MS later; while a mouse rests on the control bar they stay.
   const idleTimer = useRef<number | undefined>(undefined)
   const poke = useCallback(() => {
     setIdle(false)
     window.clearTimeout(idleTimer.current)
-    idleTimer.current = window.setTimeout(() => setIdle(true), IDLE_MS)
+    const arm = () => {
+      idleTimer.current = window.setTimeout(() => {
+        const overBar = HOVER_MQ.matches && !!wrap.current?.querySelector('.vp-controls:hover')
+        if (overBar) arm()
+        else setIdle(true)
+      }, IDLE_MS)
+    }
+    arm()
   }, [])
+  pokeRef.current = poke
   useEffect(() => () => window.clearTimeout(idleTimer.current), [])
-  const hidden = idle && playing && menu === null && scrub === null && !help
+
+  useEffect(() => {
+    const onChange = () => {
+      setFullscreen(document.fullscreenElement === wrap.current)
+      poke()
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [poke])
+
+  // Pointer and key activity is watched on the document (capture phase), not only on the player box:
+  // in WebView2 fullscreen the box's own pointer events do not reliably arrive, so the bar never came back.
+  useEffect(() => {
+    let last = 0
+    let at = ''
+    const onMove = (e: Event) => {
+      const inside = !!document.fullscreenElement || (e.target instanceof Node && !!wrap.current?.contains(e.target))
+      if (!inside) return
+      // Chromium sends synthetic moves at the same spot when the content under a resting cursor changes
+      // (e.g. the bar fading in); counting those would keep the bar up forever.
+      if (e instanceof MouseEvent && e.type !== 'pointerdown') {
+        const here = `${e.screenX},${e.screenY}`
+        if (here === at) return
+        at = here
+      }
+      const now = performance.now()
+      if (now - last < 120) return
+      last = now
+      poke()
+    }
+    const onKey = () => {
+      if (document.fullscreenElement || wrap.current?.contains(document.activeElement)) poke()
+    }
+    const opts = { capture: true, passive: true }
+    document.addEventListener('pointermove', onMove, opts)
+    document.addEventListener('mousemove', onMove, opts)
+    document.addEventListener('pointerdown', onMove, opts)
+    document.addEventListener('keydown', onKey, opts)
+    return () => {
+      document.removeEventListener('pointermove', onMove, opts)
+      document.removeEventListener('mousemove', onMove, opts)
+      document.removeEventListener('pointerdown', onMove, opts)
+      document.removeEventListener('keydown', onKey, opts)
+    }
+  }, [poke])
+  const hidden = idle && playing && menu === null && scrub === null && !help && !volOpen
 
   // ---- actions ----
   const toggle = useCallback(() => {
@@ -430,7 +488,7 @@ export default function VideoPlayer({
     }
     setMenu(null)
   }, [])
-  // "c": subtitles on (the last chosen track, else the first German, else the first) or off.
+  // "c": subtitles on (the last chosen track, else the first in the UI language, else the first) or off.
   const lastSub = useRef(-1)
   if (sub >= 0) lastSub.current = sub
   const subsRef = useRef(subs)
@@ -441,8 +499,9 @@ export default function VideoPlayer({
     const list = subsRef.current
     if (list.length === 0) return
     if (subRef.current >= 0) return pickSub(-1)
-    const de = list.find((s) => s.label === 'Deutsch')
-    pickSub(lastSub.current >= 0 ? lastSub.current : (de?.id ?? list[0]?.id ?? 0))
+    const want = getLang().slice(0, 2).toUpperCase()
+    const mine = list.find((s) => langCode(s.lang) === want)
+    pickSub(lastSub.current >= 0 ? lastSub.current : (mine?.id ?? list[0]?.id ?? 0))
   }, [pickSub])
   const nextRef = useRef(next)
   nextRef.current = next
@@ -450,7 +509,7 @@ export default function VideoPlayer({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      const t = e.target as HTMLElement | null
+      const t = e.target instanceof HTMLElement ? e.target : null
       // Only text fields swallow the shortcuts; the volume slider keeps them (its own arrow keys stay native).
       const range = t instanceof HTMLInputElement && t.type === 'range'
       if (t && (t.isContentEditable || ['TEXTAREA', 'SELECT'].includes(t.tagName) || (t.tagName === 'INPUT' && !range))) return
@@ -548,6 +607,29 @@ export default function VideoPlayer({
     return () => window.removeEventListener('pointerdown', onDown)
   }, [menu])
 
+  // Phones: the opened slider folds back on a tap elsewhere, or 3.5 s after the last change.
+  useEffect(() => {
+    if (!volOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (!volBox.current?.contains(e.target as Node)) setVolOpen(false)
+    }
+    window.addEventListener('pointerdown', onDown)
+    const timer = window.setTimeout(() => setVolOpen(false), 3500)
+    return () => {
+      window.removeEventListener('pointerdown', onDown)
+      window.clearTimeout(timer)
+    }
+  }, [volOpen, vol])
+  useEffect(() => {
+    if (!narrow) setVolOpen(false)
+  }, [narrow])
+  // Phone tap on the speaker: the first one opens the slider, the next ones mute. Desktop: mute.
+  const onSpeaker = () => {
+    if (narrow && CAN_SET_VOLUME && !volOpen) setVolOpen(true)
+    else toggleMute()
+  }
+  const speakerOpens = narrow && CAN_SET_VOLUME && !volOpen
+
   const pickLevel = (id: number) => {
     const hls = hlsRef.current
     if (hls) hls.currentLevel = id
@@ -627,8 +709,17 @@ export default function VideoPlayer({
   const pct = (seconds: number) => (duration > 0 ? clamp((seconds / duration) * 100, 0, 100) : 0)
   const ahead = buffer.data && prefetching && buffer.data.ahead_seconds > 0 ? buffer.data : null
   const activeLabel = levels.find((l) => l.id === activeLevel)?.label
-  const qualityLabel = level === -1 ? (activeLabel ? `Auto, ${activeLabel}` : 'Auto') : (levels.find((l) => l.id === level)?.label ?? 'Auto')
+  const qualityLabel =
+    level === -1
+      ? activeLabel
+        ? t('vp.autoWith', { level: activeLabel })
+        : t('vp.auto')
+      : (levels.find((l) => l.id === level)?.label ?? t('vp.auto'))
   const volumeShown = vol.muted ? 0 : vol.volume
+  const subOptions: Option[] = subs.map((s) => ({ id: s.id, label: trackLabel(s, s.id, t('scan.subs')) }))
+  const audioOptions: Option[] = audios.map((a) => ({ id: a.id, label: trackLabel(a, a.id, t('scan.audio')) }))
+  const withKey = (label: string, key: string) => t('common.withKey', { label, key })
+  const keyName = (keys: string) => (keys.startsWith('vp.') ? t(keys as Key) : keys)
 
   return (
     <div
@@ -636,8 +727,7 @@ export default function VideoPlayer({
       className={`vp${hidden ? ' is-idle' : ''}${fullscreen ? ' is-fullscreen' : ''}`}
       data-audio-track={audio}
       data-subtitle-track={sub}
-      onPointerMove={poke}
-      onPointerLeave={() => playing && setIdle(true)}
+      onPointerLeave={() => playing && !document.fullscreenElement && setIdle(true)}
     >
       <video
         ref={video}
@@ -651,12 +741,12 @@ export default function VideoPlayer({
 
       {(waiting || !started) && !fatal && !ended && (
         <div className="vp-center" aria-hidden={started}>
-          <Flicker size={52} label={started ? undefined : 'Video wird geladen'} />
+          <Flicker size={52} label={started ? undefined : t('vp.loading')} />
         </div>
       )}
 
       {started && !playing && !waiting && !ended && !fatal && (
-        <button type="button" className="vp-bigplay" onClick={toggle} aria-label="Abspielen">
+        <button type="button" className="vp-bigplay" onClick={toggle} aria-label={t('common.play')}>
           <Icon name="play" size={34} />
         </button>
       )}
@@ -664,8 +754,8 @@ export default function VideoPlayer({
       {fatal && (
         <div className="vp-overlay" role="alert">
           <Icon name="warn" size={28} />
-          <p className="vp-overlay-title">{fatal}</p>
-          <p>Das liegt am Anbieter, nicht an dir. Mit einer anderen Quelle geht es meist sofort weiter.</p>
+          <p className="vp-overlay-title">{t(fatal)}</p>
+          <p>{t('vp.fatalHint')}</p>
           {fallback && (
             <button type="button" className="btn btn-primary btn-lg" onClick={fallback.run} autoFocus>
               <Icon name="refresh" size={18} />
@@ -680,24 +770,26 @@ export default function VideoPlayer({
           <div className="vp-help-card">
             <div className="vp-help-head">
               <p className="vp-help-title" id="vp-help-title">
-                Tastenkürzel
+                {t('vp.shortcuts')}
               </p>
-              <button type="button" className="vp-btn" onClick={() => setHelp(false)} aria-label="Übersicht schließen" autoFocus>
+              <button type="button" className="vp-btn" onClick={() => setHelp(false)} aria-label={t('vp.closeHelp')} autoFocus>
                 <Icon name="close" size={20} />
               </button>
             </div>
             <dl className="vp-help-list">
-              {KEYS.filter(([k]) => (k !== 'N' || !!next) && (k !== 'C' || subs.length > 0)).map(([k, what]) => (
-                <div key={k}>
+              {KEYS.filter((k) => (k.id !== 'next' || !!next) && (k.id !== 'subs' || subs.length > 0)).map((k) => (
+                <div key={k.id}>
                   <dt>
-                    {k.split(' / ').map((part, i) => (
-                      <span key={part}>
-                        {i > 0 && ' '}
-                        <kbd>{part}</kbd>
-                      </span>
-                    ))}
+                    {keyName(k.keys)
+                      .split(' / ')
+                      .map((part, i) => (
+                        <span key={part}>
+                          {i > 0 && ' '}
+                          <kbd>{part}</kbd>
+                        </span>
+                      ))}
                   </dt>
-                  <dd>{what}</dd>
+                  <dd>{t(k.what)}</dd>
                 </div>
               ))}
             </dl>
@@ -707,19 +799,19 @@ export default function VideoPlayer({
 
       {showHint && resumeHint !== undefined && (
         <div className="vp-resume" role="status">
-          <span>Fortgesetzt bei {formatClock(resumeHint)}</span>
+          <span>{t('vp.resumed', { t: formatClock(resumeHint) })}</span>
           <button type="button" className="vp-resume-btn" onClick={restart}>
             <Icon name="refresh" size={15} />
-            Von vorn
+            {t('vp.restart')}
           </button>
         </div>
       )}
 
       {upNext && next && (
-        <section className="vp-upnext" aria-label="Nächste Folge">
+        <section className="vp-upnext" aria-label={t('player.nextEpisode')}>
           {next.still && <img className="vp-upnext-still" src={next.still} alt="" />}
           <div className="vp-upnext-body">
-            <p className="vp-upnext-kicker">Nächste Folge in {count} s</p>
+            <p className="vp-upnext-kicker">{t('vp.nextIn', { n: count })}</p>
             <p className="vp-upnext-title">{next.label}</p>
             {next.name && <p className="vp-upnext-name">{next.name}</p>}
             <div className="vp-upnext-actions">
@@ -730,11 +822,16 @@ export default function VideoPlayer({
                   style={{ transform: `scaleX(${(UP_NEXT_COUNTDOWN - count) / UP_NEXT_COUNTDOWN})` }}
                 />
                 <Icon name="play" size={16} />
-                Jetzt abspielen
+                {t('vp.playNow')}
               </button>
-              <button type="button" className="btn btn-glass vp-upnext-cancel" onClick={() => setUpNextOff(true)} aria-label="Abbrechen">
+              <button
+                type="button"
+                className="btn btn-glass vp-upnext-cancel"
+                onClick={() => setUpNextOff(true)}
+                aria-label={t('common.cancel')}
+              >
                 <Icon name="close" size={16} />
-                <span className="vp-upnext-cancel-text">Abbrechen</span>
+                <span className="vp-upnext-cancel-text">{t('common.cancel')}</span>
               </button>
             </div>
           </div>
@@ -745,25 +842,25 @@ export default function VideoPlayer({
         <div className="vp-overlay">
           {next ? (
             <>
-              <p className="vp-overlay-kicker">Als Nächstes</p>
+              <p className="vp-overlay-kicker">{t('vp.upNext')}</p>
               <p className="vp-overlay-title">{next.label}</p>
               <div className="actions">
                 <button type="button" className="btn btn-primary btn-lg" onClick={next.go} autoFocus>
                   <Icon name="next" size={18} />
-                  Nächste Folge
+                  {t('player.nextEpisode')}
                 </button>
                 <button type="button" className="btn btn-glass btn-lg" onClick={() => (seekTo(0), toggle())}>
                   <Icon name="refresh" size={18} />
-                  Noch einmal
+                  {t('vp.again')}
                 </button>
               </div>
             </>
           ) : (
             <>
-              <p className="vp-overlay-title">Zu Ende</p>
+              <p className="vp-overlay-title">{t('vp.theEnd')}</p>
               <button type="button" className="btn btn-glass btn-lg" onClick={() => (seekTo(0), toggle())}>
                 <Icon name="refresh" size={18} />
-                Noch einmal ansehen
+                {t('vp.watchAgain')}
               </button>
             </>
           )}
@@ -775,17 +872,17 @@ export default function VideoPlayer({
         {subtitle && <p className="vp-subtitle">{subtitle}</p>}
       </div>
 
-      <div className="vp-controls" onPointerMove={(e) => e.stopPropagation()} onPointerEnter={() => setIdle(false)}>
+      <div className="vp-controls" onPointerEnter={poke}>
         <div
           ref={bar}
           className={`vp-seek${scrub !== null ? ' is-scrubbing' : ''}`}
           role="slider"
           tabIndex={0}
-          aria-label="Position im Video"
+          aria-label={t('vp.position')}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration)}
           aria-valuenow={Math.round(shown)}
-          aria-valuetext={`${formatClock(shown)} von ${formatClock(duration)}`}
+          aria-valuetext={t('vp.positionText', { a: formatClock(shown), b: formatClock(duration) })}
           onPointerDown={onBarDown}
           onPointerMove={onBarMove}
           onPointerUp={onBarUp}
@@ -817,9 +914,9 @@ export default function VideoPlayer({
             type="button"
             className="vp-btn"
             onClick={toggle}
-            aria-label={playing ? 'Pause' : 'Abspielen'}
+            aria-label={playing ? t('vp.pause') : t('common.play')}
             aria-keyshortcuts="k"
-            title={playing ? 'Pause (Leertaste)' : 'Abspielen (Leertaste)'}
+            title={withKey(playing ? t('vp.pause') : t('common.play'), t('vp.space'))}
           >
             <Icon name={playing ? 'pause' : 'play'} size={22} />
           </button>
@@ -828,76 +925,37 @@ export default function VideoPlayer({
               type="button"
               className="vp-btn"
               onClick={next.go}
-              aria-label={`Nächste Folge: ${next.label}`}
+              aria-label={t('vp.nextLabel', { label: next.label })}
               aria-keyshortcuts="n"
-              title="Nächste Folge (N)"
+              title={withKey(t('player.nextEpisode'), 'N')}
             >
               <Icon name="next" size={22} />
             </button>
           )}
-          <div className="vp-volume vp-menu">
-            {narrow ? (
-              // Small screens have no room for the inline slider: the speaker opens a volume panel.
-              <button
-                type="button"
-                className="vp-btn"
-                onClick={() => setMenu((m) => (m === 'volume' ? null : 'volume'))}
-                aria-label="Lautstärke"
-                aria-haspopup="true"
-                aria-expanded={menu === 'volume'}
-              >
-                <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="vp-btn"
-                onClick={toggleMute}
-                aria-label={vol.muted ? 'Ton an' : 'Ton aus'}
-                aria-pressed={vol.muted}
-                aria-keyshortcuts="m"
-                title={vol.muted ? 'Ton an (M)' : 'Ton aus (M)'}
-              >
-                <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
-              </button>
-            )}
-            {!narrow && <VolumeRange value={volumeShown} onChange={(v) => setVol({ volume: v, muted: false })} />}
-            {menu === 'volume' && (
-              <div className="vp-pop vp-volpop" role="group" aria-label="Lautstärke">
-                <p className="vp-pop-title">Lautstärke</p>
-                <div className="vp-volpop-row">
-                  <button
-                    type="button"
-                    className="vp-btn"
-                    onClick={toggleMute}
-                    aria-label={vol.muted ? 'Ton an' : 'Ton aus'}
-                    aria-pressed={vol.muted}
-                  >
-                    <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
-                  </button>
-                  {CAN_SET_VOLUME ? (
-                    <>
-                      <VolumeRange large value={volumeShown} onChange={(v) => setVol({ volume: v, muted: false })} />
-                      <span className="vp-volpop-val">{Math.round(volumeShown * 100)} %</span>
-                    </>
-                  ) : (
-                    <span className="vp-volpop-note">{vol.muted ? 'Stumm' : 'Ton an'}</span>
-                  )}
-                </div>
-                {!CAN_SET_VOLUME && (
-                  <p className="vp-volpop-note">Lauter und leiser geht auf diesem Gerät nur mit den Tasten am Gerät.</p>
-                )}
-              </div>
-            )}
+          {/* Speaker plus a slim slider that slides out of it (hover / focus on desktop, a tap on phones). */}
+          <div ref={volBox} className={`vp-volume${volOpen ? ' is-open' : ''}`}>
+            <button
+              type="button"
+              className="vp-btn"
+              onClick={onSpeaker}
+              aria-label={speakerOpens ? t('vp.volume') : vol.muted ? t('vp.unmute') : t('vp.mute')}
+              aria-expanded={narrow && CAN_SET_VOLUME ? volOpen : undefined}
+              aria-pressed={speakerOpens ? undefined : vol.muted}
+              aria-keyshortcuts="m"
+              title={speakerOpens ? t('vp.volume') : withKey(vol.muted ? t('vp.unmute') : t('vp.mute'), 'M')}
+            >
+              <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
+            </button>
+            {CAN_SET_VOLUME && <VolumeRange t={t} value={volumeShown} onChange={(v) => setVol({ volume: v, muted: false })} />}
           </div>
           <p className="vp-time">
             <span>{formatClock(shown)}</span>
             <span className="vp-time-total">{formatClock(duration)}</span>
           </p>
           {ahead && (
-            <p className="vp-ahead" title="So weit hat Flimmer den Film schon auf die Platte geladen">
+            <p className="vp-ahead" title={t('vp.aheadTitle')}>
               <span className="vp-ahead-dot" />
-              {ahead.done ? 'Vorgeladen' : 'Lädt vor'}: {Math.max(1, Math.round(ahead.ahead_seconds / 60))} Min.
+              {t(ahead.done ? 'vp.prefetched' : 'vp.prefetching', { n: Math.max(1, Math.round(ahead.ahead_seconds / 60)) })}
             </p>
           )}
 
@@ -907,28 +965,37 @@ export default function VideoPlayer({
             <PlayerMenu
               id="subs"
               icon="subtitles"
-              title="Untertitel"
+              title={t('scan.subs')}
               hint="C"
               open={menu === 'subs'}
               onToggle={setMenu}
               value={sub}
-              options={[{ id: -1, label: 'Aus' }, ...subs]}
+              options={[{ id: -1, label: t('vp.off') }, ...subOptions]}
               onPick={pickSub}
             />
           )}
           {audios.length > 1 && (
-            <PlayerMenu id="audio" icon="audio" title="Tonspur" open={menu === 'audio'} onToggle={setMenu} value={audio} options={audios} onPick={pickAudio} />
+            <PlayerMenu
+              id="audio"
+              icon="audio"
+              title={t('scan.audio')}
+              open={menu === 'audio'}
+              onToggle={setMenu}
+              value={audio}
+              options={audioOptions}
+              onPick={pickAudio}
+            />
           )}
           {levels.length > 0 && (
             <PlayerMenu
               id="quality"
               icon="layers"
-              title="Qualität"
+              title={t('vp.quality')}
               text={qualityLabel}
               open={menu === 'quality'}
               onToggle={setMenu}
               value={level}
-              options={[{ id: -1, label: 'Auto' }, ...levels]}
+              options={[{ id: -1, label: t('vp.auto') }, ...levels]}
               onPick={pickLevel}
             />
           )}
@@ -936,10 +1003,10 @@ export default function VideoPlayer({
             type="button"
             className="vp-btn vp-btn-help"
             onClick={() => (setMenu(null), setHelp((h) => !h))}
-            aria-label="Tastenkürzel"
+            aria-label={t('vp.shortcuts')}
             aria-expanded={help}
             aria-keyshortcuts="?"
-            title="Tastenkürzel (?)"
+            title={withKey(t('vp.shortcuts'), '?')}
           >
             <span className="vp-help-q" aria-hidden="true">
               ?
@@ -949,9 +1016,9 @@ export default function VideoPlayer({
             type="button"
             className="vp-btn"
             onClick={toggleFullscreen}
-            aria-label={fullscreen ? 'Vollbild verlassen' : 'Vollbild'}
+            aria-label={fullscreen ? t('vp.exitFullscreen') : t('vp.fullscreen')}
             aria-keyshortcuts="f"
-            title={fullscreen ? 'Vollbild verlassen (F)' : 'Vollbild (F)'}
+            title={withKey(fullscreen ? t('vp.exitFullscreen') : t('vp.fullscreen'), 'F')}
           >
             <Icon name={fullscreen ? 'shrink' : 'expand'} size={22} />
           </button>
@@ -979,6 +1046,7 @@ function PlayerMenu({ id, icon, title, hint, text, open, onToggle, value, option
   const trigger = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
   const wasOpen = useRef(false)
+  const { t } = useI18n()
   // Opening moves focus to the current choice; closing gives it back to the button.
   useEffect(() => {
     if (open) {
@@ -1007,7 +1075,7 @@ function PlayerMenu({ id, icon, title, hint, text, open, onToggle, value, option
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={text ? `${title}: ${text}` : title}
-        title={hint ? `${title} (${hint})` : title}
+        title={hint ? t('common.withKey', { label: title, key: hint }) : title}
         onClick={() => onToggle(open ? null : id)}
       >
         <Icon name={icon} size={22} />

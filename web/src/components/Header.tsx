@@ -1,26 +1,29 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { useI18n, type Key } from '../i18n'
 import { useNewEpisodes } from '../lib/progress'
 import Icon, { type IconName } from './Icon'
 import Logo from './Logo'
+import SettingsMenu from './SettingsMenu'
 
-const NAV: { to: string; label: string; end: boolean; icon: IconName }[] = [
-  { to: '/', label: 'Start', end: true, icon: 'home' },
-  { to: '/filme', label: 'Filme', end: false, icon: 'film' },
-  { to: '/serien', label: 'Serien', end: false, icon: 'tv' },
-  { to: '/merkliste', label: 'Merkliste', end: false, icon: 'bookmark' },
-  { to: '/verlauf', label: 'Verlauf', end: false, icon: 'clock' },
+const NAV: { to: string; label: Key; end: boolean; icon: IconName }[] = [
+  { to: '/', label: 'nav.home', end: true, icon: 'home' },
+  { to: '/filme', label: 'nav.movies', end: false, icon: 'film' },
+  { to: '/serien', label: 'nav.tv', end: false, icon: 'tv' },
+  { to: '/merkliste', label: 'nav.watchlist', end: false, icon: 'bookmark' },
+  { to: '/verlauf', label: 'nav.history', end: false, icon: 'clock' },
 ]
 
-/** Series with new episodes, shown on the "Verlauf" entry. */
+/** Series with new episodes, shown on the history entry. */
 function Badge({ to, count }: { to: string; count: number }) {
+  const { t } = useI18n()
   if (to !== '/verlauf' || count === 0) return null
   return (
     <>
       <span className="nav-badge" aria-hidden="true">
         {count > 9 ? '9+' : count}
       </span>
-      <span className="sr-only">{count === 1 ? ', 1 Serie mit neuen Folgen' : `, ${count} Serien mit neuen Folgen`}</span>
+      <span className="sr-only">{t('nav.newBadge', { n: count })}</span>
     </>
   )
 }
@@ -48,6 +51,7 @@ export default function Header() {
   const typed = useRef(false)
   const scrolled = useScrolled()
   const fresh = useNewEpisodes().data?.length ?? 0
+  const { t } = useI18n()
 
   // Keep field in sync when the URL changes (back/forward, leaving search).
   useEffect(() => {
@@ -86,10 +90,10 @@ export default function Header() {
       <header className={`header${scrolled ? ' is-solid' : ''}`}>
         <div className="header-inner">
           <Logo />
-          <nav className="nav" aria-label="Hauptnavigation">
+          <nav className="nav" aria-label={t('nav.main')}>
             {NAV.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
-                {n.label}
+                {t(n.label)}
                 <Badge to={n.to} count={fresh} />
               </NavLink>
             ))}
@@ -113,8 +117,8 @@ export default function Header() {
                 typed.current = true
                 setValue(e.target.value)
               }}
-              placeholder="Filme und Serien suchen"
-              aria-label="Filme und Serien suchen"
+              placeholder={t('search.placeholder')}
+              aria-label={t('search.placeholder')}
               autoComplete="off"
               spellCheck={false}
               enterKeyHint="search"
@@ -123,17 +127,18 @@ export default function Header() {
               /
             </kbd>
           </form>
+          <SettingsMenu />
         </div>
       </header>
 
-      <nav className="tabbar" aria-label="Hauptnavigation">
+      <nav className="tabbar" aria-label={t('nav.main')}>
         {NAV.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link">
             <span className="tabbar-icon">
               <Icon name={n.icon} size={22} />
               <Badge to={n.to} count={fresh} />
             </span>
-            <span>{n.label}</span>
+            <span>{t(n.label)}</span>
           </NavLink>
         ))}
       </nav>

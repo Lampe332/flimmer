@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@fontsource-variable/bricolage-grotesque/wdth.css'
 import '@fontsource-variable/instrument-sans'
 import './styles.css'
+import { subscribeLang } from './i18n'
 import { ApiError } from './lib/api'
 import App from './App'
 
@@ -19,8 +20,14 @@ const queryClient = new QueryClient({
   },
 })
 
+/** Data that depends on the UI language (TMDB texts) is fetched again after a switch; the old text stays until the new one arrives. */
+const LANG_FREE = new Set(['scan', 'buffer', 'caps', 'settings', 'progress', 'watchlist'])
+subscribeLang(() => {
+  void queryClient.invalidateQueries({ predicate: (q) => !LANG_FREE.has(String(q.queryKey[0])) })
+})
+
 const root = document.getElementById('root')
-if (!root) throw new Error('#root fehlt')
+if (!root) throw new Error('#root is missing')
 
 createRoot(root).render(
   <StrictMode>
