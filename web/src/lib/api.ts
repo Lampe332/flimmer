@@ -326,6 +326,11 @@ export function titlePath(item: Pick<Item, 'type' | 'id'>): string {
   return `/titel/${item.type}/${item.id}`
 }
 
+/** "Play" without choosing an episode: a series continues where you left off (the player resolves it). */
+export function playStartPath(item: Pick<Item, 'type' | 'id'>): string {
+  return `/play/${item.type}/${item.id}`
+}
+
 export function playPath(type: MediaType, id: number, s?: number, e?: number): string {
   return type === 'tv' ? `/play/tv/${id}?s=${s ?? 1}&e=${e ?? 1}` : `/play/movie/${id}`
 }

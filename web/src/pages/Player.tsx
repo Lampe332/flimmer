@@ -6,7 +6,7 @@ import Icon from '../components/Icon'
 import ScanPanel from '../components/player/ScanPanel'
 import VideoPlayer from '../components/player/VideoPlayer'
 import SeasonTabs from '../components/SeasonTabs'
-import { ErrorState, Flicker } from '../components/States'
+import { ErrorState, Flicker, PageLoader } from '../components/States'
 import {
   api,
   ApiError,
@@ -20,22 +20,41 @@ import {
 } from '../lib/api'
 import { formatDate, formatHeight, isUpcoming } from '../lib/format'
 import { rank } from '../lib/pick'
-import { invalidateWatching, neighbour, useProgress, type Ep } from '../lib/progress'
+import { invalidateWatching, neighbour, resumeTarget, useProgress, type Ep } from '../lib/progress'
 import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
 /** Server defaults, used until the saved settings have loaded. */
 const DEFAULTS: Settings = { filter: { min_height: 0, audio_lang: 'any', sort: 'quality' }, prefetch_minutes: 10 }
 const NO_SCAN: Scan = { state: 'unavailable', started_at: null, finished_at: null, results: [] }
+/** Seconds of scanning after which playback starts with the best source found so far. */
+const EARLY_S = 8
 
 export default function Player() {
   const { type, id: idRaw } = useParams()
   const [params] = useSearchParams()
   const id = Number(idRaw)
   if (!isMediaType(type) || !Number.isInteger(id) || id <= 0) return <NotFound />
-  const s = Math.max(0, Math.floor(Number(params.get('s'))) || 1)
+  if (type === 'tv' && !params.has('s')) return <ResumeSeries id={id} />
+  const s =Math.max(0, Math.floor(Number(params.get('s'))) || 1)
   const e = Math.max(1, Math.floor(Number(params.get('e'))) || 1)
   return <PlayerView key={`${type}-${id}-${s}-${e}`} type={type} id={id} s={s} e={e} />
+}
+
+/** `/play/tv/:id` without an episode: continue where you left off, else start with the first episode. */
+function ResumeSeries({ id }: { id: number }) {
+  const navigate = useNavigate()
+  const details = useQuery({ queryKey: ['title', 'tv', id], queryFn: () => api.title('tv', id) })
+  const progress = useProgress('tv', id)
+  const ready = !!details.data && (progress.isFetched || progress.isError)
+  useEffect(() => {
+    if (!ready || !details.data) return
+    const seasons = details.data.seasons
+    const to = resumeTarget(progress.data ?? [], seasons)
+    void navigate(playPath('tv', id, to?.s ?? seasons[0]?.season_number ?? 1, to?.e ?? 1), { replace: true })
+  }, [ready, details.data, progress.data, id, navigate])
+  if (details.error) return <ErrorState error={details.error} onRetry={() => void details.refetch()} />
+  return <PageLoader />
 }
 
 function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number; e: number }) {
@@ -112,11 +131,14 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   // Automatic choice: start quickly with the best result so far (after 8 s of scanning or when the scan is done),
   // then upgrade automatically while the scan is still running if a better one arrives. Manual choice always wins.
   const [early, setEarly] = useState(false)
+  const [waited, setWaited] = useState(0)
   useEffect(() => {
     setEarly(false)
+    setWaited(0)
     if (!running) return
-    const t = setTimeout(() => setEarly(true), 8000)
-    return () => clearTimeout(t)
+    const t = setTimeout(() => setEarly(true), EARLY_S * 1000)
+    const tick = setInterval(() => setWaited((w) => w + 1), 1000)
+    return () => (clearTimeout(t), clearInterval(tick))
   }, [running, scanKey])
   useEffect(() => {
     if (!settled && !early) return
@@ -135,6 +157,30 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
     save.mutate(next)
     if (!manual) setLocked(null)
   }
+
+  // The playing source broke for good: drop it, the automatic choice then takes the next best one.
+  const onFailed = () => {
+    const provider = active?.provider_id
+    if (!provider) return
+    setDead((old) => new Set(old).add(provider))
+    setManual(null)
+    setLocked(null)
+  }
+  const others = ranked.filter((r) => r.provider_id !== active?.provider_id).length
+  const fallback =
+    others > 0
+      ? { label: 'Andere Quelle', run: onFailed }
+      : sniffer
+        ? {
+            label: 'Quellen neu suchen',
+            run: () => {
+              setDead(new Set())
+              setManual(null)
+              setLocked(null)
+              startScan({ force: true })
+            },
+          }
+        : undefined
 
   const onExpired = () => {
     const provider = active?.provider_id
@@ -181,7 +227,19 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   return (
     <div className="player-page">
       <div className="player-top">
-        <Link to={titlePath({ type, id })} className="back-link" aria-label={d ? `Zurück zu ${d.title}` : 'Zurück zum Titel'}>
+        <Link
+          to={titlePath({ type, id })}
+          className="back-link"
+          aria-label="Zurück"
+          title="Zurück"
+          onClick={(ev) => {
+            // Came here from inside Flimmer: go back to exactly that page (and its scroll position).
+            if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) {
+              ev.preventDefault()
+              void navigate(-1)
+            }
+          }}
+        >
           <Icon name="left" size={18} />
         </Link>
         <div className="player-heading">
@@ -222,6 +280,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                 onSave={onSave}
                 resumeHint={!hintDone && savedStart > 0 ? savedStart : undefined}
                 onHintDone={() => setHintDone(true)}
+                fallback={fallback}
                 next={
                   nextPlayable
                     ? {
@@ -244,16 +303,31 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                   ) : running ? (
                     <>
                       <Flicker size={52} />
-                      <h2>Quellen werden geprüft</h2>
+                      <h2>{best ? 'Quelle gefunden' : early ? 'Suche läuft noch' : 'Suche die beste Quelle …'}</h2>
                       <p>
-                        {results.length > 0
-                          ? `${checked} von ${results.length} Anbietern haben geantwortet. Flimmer startet mit der besten Quelle, sobald alle durch sind.`
-                          : 'Flimmer fragt die Anbieter nach einem Stream für diesen Titel.'}
+                        {best
+                          ? `Es geht in ${Math.max(1, EARLY_S - waited)} s los. Findet Flimmer bis dahin etwas Besseres, nimmt es das.`
+                          : early
+                            ? 'Bisher hat kein Anbieter geantwortet. Flimmer sucht weiter und startet, sobald etwas da ist. Das kann bis zu 2 Minuten dauern.'
+                            : 'Flimmer fragt gerade alle Anbieter. Du musst nichts tun, das Video startet von selbst.'}
                       </p>
+                      {results.length > 0 && (
+                        <span
+                          className="scan-meter"
+                          role="progressbar"
+                          aria-label="Suche"
+                          aria-valuemin={0}
+                          aria-valuemax={results.length}
+                          aria-valuenow={checked}
+                          aria-valuetext={`${checked} von ${results.length} Anbietern geprüft`}
+                        >
+                          <span style={{ transform: `scaleX(${checked / results.length})` }} />
+                        </span>
+                      )}
                       {best && (
                         <button type="button" className="btn btn-primary" onClick={() => setLocked(best.provider_id)}>
                           <Icon name="play" size={16} />
-                          Jetzt mit {best.name} starten
+                          Sofort starten
                           {formatHeight(best.max_height) && <span className="btn-note">{formatHeight(best.max_height)}</span>}
                         </button>
                       )}
@@ -287,7 +361,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       </p>
                       <button type="button" className="btn btn-primary" onClick={() => startScan({ force: true })}>
                         <Icon name="refresh" size={16} />
-                        Neu prüfen
+                        Noch einmal suchen
                       </button>
                     </>
                   )}

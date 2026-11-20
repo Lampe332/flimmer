@@ -81,11 +81,32 @@ const LANGS: Record<string, string> = {
   rus: 'Russisch',
 }
 
-/** Readable name for a playlist track: its own name, else the language, else a numbered fallback. */
+/** English language names as playlists spell them, mapped to the German word. */
+const NAMES_DE: Record<string, string> = {
+  german: 'Deutsch',
+  english: 'Englisch',
+  french: 'Französisch',
+  spanish: 'Spanisch',
+  italian: 'Italienisch',
+  japanese: 'Japanisch',
+  korean: 'Koreanisch',
+  turkish: 'Türkisch',
+  portuguese: 'Portugiesisch',
+  russian: 'Russisch',
+}
+/** Playlist tags in track names, in plain German. */
+const TAGS: [RegExp, string][] = [
+  [/\s*[[(]\s*forced\s*[\])]/i, ' (nur Fremdsprache)'],
+  [/\s*[[(]\s*(cc|sdh)\s*[\])]/i, ' (mit Geräuschen)'],
+]
+
+/** Readable German name for a playlist track: "Italian [Forced]" → "Italienisch (nur Fremdsprache)". */
 export function trackLabel(track: { lang?: string | null; name?: string | null }, index: number, kind: string): string {
   const lang = track.lang ? LANGS[track.lang.toLowerCase()] : undefined
-  const name = track.name?.trim()
-  if (lang && (!name || name.length <= 3)) return lang
+  let name = track.name?.trim() ?? ''
+  if (lang && name.length <= 3) return lang
+  for (const [en, de] of Object.entries(NAMES_DE)) name = name.replace(new RegExp(`^${en}\\b`, 'i'), de)
+  for (const [re, de] of TAGS) name = name.replace(re, de)
   return name || (track.lang && track.lang !== 'und' ? track.lang.toUpperCase() : `${kind} ${index + 1}`)
 }
 

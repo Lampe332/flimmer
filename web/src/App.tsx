@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect } from 'react'
-import { Route, Routes, useLocation } from 'react-router'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react'
+import { Route, Routes, useLocation, useNavigationType } from 'react-router'
 import ErrorBoundary from './components/ErrorBoundary'
 import Footer from './components/Footer'
 import Header from './components/Header'
@@ -14,11 +14,40 @@ const Watchlist = lazy(() => import('./pages/Watchlist'))
 const History = lazy(() => import('./pages/History'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
-function ScrollToTop() {
-  const { pathname } = useLocation()
+/** Scroll position per history entry, so "back" lands where you left the page. */
+const positions = new Map<string, number>()
+
+function ScrollManager() {
+  const { key } = useLocation()
+  const nav = useNavigationType()
+  const current = useRef(key)
+
   useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [pathname])
+    window.history.scrollRestoration = 'manual'
+    const onScroll = () => positions.set(current.current, window.scrollY)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useLayoutEffect(() => {
+    current.current = key
+    // REPLACE (season tab, typing in the search) keeps the position; a new page starts at the top.
+    if (nav === 'REPLACE') return
+    if (nav === 'PUSH') {
+      window.scrollTo(0, 0)
+      return
+    }
+    // Back/forward: the page may still be loading, so keep trying until it is tall enough (about 1 s).
+    const y = positions.get(key) ?? 0
+    let tries = 0
+    let frame = 0
+    const go = () => {
+      window.scrollTo(0, y)
+      if (Math.abs(window.scrollY - y) > 2 && tries++ < 60) frame = requestAnimationFrame(go)
+    }
+    go()
+    return () => cancelAnimationFrame(frame)
+  }, [key, nav])
   return null
 }
 
@@ -30,7 +59,7 @@ export default function App() {
       <a href="#main" className="skip-link">
         Zum Inhalt springen
       </a>
-      <ScrollToTop />
+      <ScrollManager />
       <Header />
       <main id="main" className="main">
         <ErrorBoundary key={pathname}>

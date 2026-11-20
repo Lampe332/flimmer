@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { playPath, titlePath, type Item } from '../lib/api'
+import { playStartPath, titlePath, type Item } from '../lib/api'
 import { formatRating, typeLabel } from '../lib/format'
 import Icon from './Icon'
 import SaveButton from './SaveButton'
@@ -62,7 +62,7 @@ export default function Hero({ items }: { items: Item[] }) {
         </h1>
         {current.overview && <p className="hero-overview">{current.overview}</p>}
         <div className="actions">
-          <Link to={playPath(current.type, current.id)} className="btn btn-primary btn-lg">
+          <Link to={playStartPath(current)} className="btn btn-primary btn-lg">
             <Icon name="play" size={18} />
             Abspielen
           </Link>

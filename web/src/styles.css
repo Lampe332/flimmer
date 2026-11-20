@@ -2732,6 +2732,257 @@ button:disabled {
   }
 }
 
+/* ---------- usability pass: quick play, scan explanations, shortcut help ---------- */
+
+/* play straight from a card: a round lamp button over the artwork (hover devices; touch opens the title page) */
+.card-play-area {
+  position: absolute;
+  inset: 0 0 auto;
+  aspect-ratio: 2 / 3;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.card-wide .card-play-area {
+  aspect-ratio: 16 / 9;
+  padding-bottom: 12%;
+}
+.card-play {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  padding-left: 3px;
+  border-radius: 50%;
+  background: var(--lampe);
+  color: var(--lampe-tinte);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  pointer-events: auto;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 0.18s ease,
+    transform 0.22s var(--ease-out);
+}
+.card-play:focus-visible {
+  opacity: 1;
+  transform: none;
+  outline-offset: 3px;
+  border-radius: 50%;
+}
+.card-play:active {
+  transform: scale(0.92);
+}
+@media (hover: hover) {
+  .card:hover .card-play {
+    opacity: 1;
+    transform: none;
+  }
+  .card-play:hover {
+    background: var(--lampe-hell);
+  }
+}
+@media (hover: none) {
+  .card-play-area {
+    display: none;
+  }
+}
+
+/* scan waiting: one calm bar instead of counters */
+.scan-meter {
+  display: block;
+  width: min(260px, 70%);
+  height: 4px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.14);
+}
+.scan-meter > span {
+  display: block;
+  height: 100%;
+  background: var(--lampe);
+  transform-origin: left;
+  transition: transform 0.6s var(--ease-out);
+}
+.scan-intro {
+  margin-top: -6px;
+  color: var(--staub);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+.filters-box {
+  border-radius: var(--r-m);
+  background: rgb(255 255 255 / 0.04);
+}
+.filters-box .filters {
+  padding-top: 2px;
+  background: none;
+}
+.filters-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border-radius: var(--r-m);
+  color: var(--staub);
+  cursor: pointer;
+  list-style: none;
+}
+.filters-summary::-webkit-details-marker {
+  display: none;
+}
+.filters-summary > svg:last-child {
+  margin-left: auto;
+  transition: transform 0.2s var(--ease-out);
+}
+.filters-box[open] .filters-summary > svg:last-child {
+  transform: rotate(180deg);
+}
+.filters-summary-text {
+  display: grid;
+  min-width: 0;
+}
+.filters-summary-label {
+  color: var(--leinwand);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.filters-summary-value {
+  overflow: hidden;
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (hover: hover) {
+  .filters-summary:hover {
+    background: rgb(255 255 255 / 0.05);
+  }
+}
+.field-hint {
+  color: var(--dunst);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+.scan-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--lampe-hell);
+  font-size: 0.8125rem;
+}
+.scan-failed {
+  color: var(--dunst);
+  font-size: 0.8125rem;
+}
+.scan-failed summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+}
+.scan-failed summary::-webkit-details-marker {
+  display: none;
+}
+.scan-failed[open] summary svg {
+  transform: rotate(180deg);
+}
+.scan-failed ul {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+.scan-failed .source {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 12px;
+}
+.scan-failed .source-name {
+  font-weight: 500;
+}
+
+/* shortcut overview inside the player (works in fullscreen too) */
+.vp-help {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-raised);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(5 6 12 / 0.72);
+  animation: route-in 0.2s var(--ease-out);
+}
+.vp-help-card {
+  width: min(420px, 100%);
+  max-height: 100%;
+  padding: 10px 14px 14px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--r-l);
+  background: rgb(16 20 42 / 0.97);
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.55),
+    0 0 0 1px var(--linie-stark);
+}
+.vp-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.vp-help-title {
+  font: 700 1.15rem var(--display);
+  font-stretch: 86%;
+}
+.vp-help-list {
+  display: grid;
+  gap: 8px;
+  margin: 6px 0 0;
+}
+.vp-help-list div {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.vp-help-list dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vp-help-list dd {
+  margin: 0;
+  color: var(--staub);
+  font-size: 0.875rem;
+}
+.vp-help kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 -1px 0 rgb(255 255 255 / 0.12);
+  color: var(--leinwand);
+  font: 600 0.75rem/1.6 var(--body);
+  text-align: center;
+}
+.vp-help-q {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1.8px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 /* ---------- responsive ---------- */
 
 @media (max-width: 1120px) {
@@ -2938,6 +3189,62 @@ button:disabled {
     width: 64px;
     height: 64px;
     margin: -32px 0 0 -32px;
+  }
+  .vp-btn-help {
+    display: none;
+  }
+  /* up next on a phone: a compact bar above the controls, no still, buttons side by side */
+  .vp-upnext {
+    right: 8px;
+    left: 8px;
+    bottom: 64px;
+    width: auto;
+    padding: 8px 10px;
+    gap: 10px;
+  }
+  .vp-upnext-still {
+    display: none;
+  }
+  .vp-upnext-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 10px;
+    width: 100%;
+  }
+  .vp-upnext-kicker,
+  .vp-upnext-title {
+    grid-column: 1;
+  }
+  .vp-upnext-title {
+    overflow: hidden;
+    font-size: 0.9375rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .vp-upnext-name {
+    display: none;
+  }
+  .vp-upnext-actions {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    flex-wrap: nowrap;
+    margin: 0;
+    gap: 6px;
+  }
+  .vp-upnext-actions .btn {
+    min-height: 40px;
+    padding: 0 12px;
+  }
+  .vp-upnext-actions .vp-upnext-cancel {
+    width: 40px;
+    padding: 0;
+  }
+  .vp-upnext-cancel-text {
+    display: none;
+  }
+  .vp-help-list div {
+    grid-template-columns: 112px minmax(0, 1fr);
   }
   .footer-inner {
     padding-bottom: 30px;

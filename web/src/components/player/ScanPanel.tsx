@@ -31,29 +31,41 @@ const LANGS: { value: AudioLang; label: string }[] = [
   { value: 'de', label: 'Deutsch' },
   { value: 'en', label: 'Englisch' },
 ]
-const SORTS: { value: SortKey; label: string }[] = [
-  { value: 'quality', label: 'Auflösung' },
-  { value: 'bitrate', label: 'Bitrate' },
-  { value: 'speed', label: 'Tempo' },
+const SORTS: { value: SortKey; label: string; hint: string }[] = [
+  { value: 'quality', label: 'Schärfe', hint: 'Die höchste Auflösung gewinnt.' },
+  { value: 'bitrate', label: 'Datenrate', hint: 'Die meisten Bilddaten pro Sekunde gewinnen, oft das ruhigste Bild.' },
+  { value: 'speed', label: 'Schneller Start', hint: 'Die Quelle, die am schnellsten geantwortet hat, gewinnt.' },
 ]
 const PREFETCH = [5, 10, 20, 30]
 
 const ORDER: Record<ScanResult['status'], number> = { ok: 0, running: 1, pending: 2, no_stream: 3, error: 4 }
+
+/** One line for the closed filter box, e.g. "ab 1080p · Deutsch · Schärfe". */
+function summary(f: Filter): string {
+  const h = HEIGHTS.find((x) => x.value === f.min_height)
+  const l = LANGS.find((x) => x.value === f.audio_lang)
+  const s = SORTS.find((x) => x.value === f.sort)
+  return [f.min_height ? h?.label : 'jede Qualität', f.audio_lang === 'any' ? 'jede Sprache' : l?.label, s?.label]
+    .filter(Boolean)
+    .join(' · ')
+}
 
 export default function ScanPanel(p: Props) {
   const { filter } = p.settings
   const results = p.scan?.results ?? []
   const ranked = rank(results, filter)
   const best = ranked[0]?.provider_id ?? null
-  const rest = results.filter((r) => !(r.status === 'ok' && r.stream_id)).sort((a, z) => ORDER[a.status] - ORDER[z.status])
-  const checked = results.filter((r) => r.status !== 'pending' && r.status !== 'running').length
+  const waiting = results.filter((r) => r.status === 'pending' || r.status === 'running')
+  const failed = results.filter((r) => r.status === 'no_stream' || r.status === 'error').sort((a, z) => ORDER[a.status] - ORDER[z.status])
   const running = p.scan?.state === 'running'
   const setFilter = (patch: Partial<Filter>) => p.onSettings({ ...p.settings, filter: { ...filter, ...patch } })
   const minutes = PREFETCH.includes(p.settings.prefetch_minutes) ? PREFETCH : [...PREFETCH, p.settings.prefetch_minutes].sort((a, z) => a - z)
+  const found = ranked.length === 1 ? '1 gefunden' : `${ranked.length} gefunden`
+  const sortHint = SORTS.find((s) => s.value === filter.sort)?.hint
 
-  let state = 'Noch nicht geprüft'
+  let state = 'Noch nicht gesucht'
   if (p.loading) state = 'Lädt'
-  else if (running) state = `${checked} von ${results.length} geprüft`
+  else if (running) state = `Suche läuft · ${found}`
   else if (results.length > 0) state = ranked.length === 1 ? '1 Quelle spielbar' : `${ranked.length} Quellen spielbar`
 
   return (
@@ -65,15 +77,29 @@ export default function ScanPanel(p: Props) {
           {state}
         </p>
         {p.sniffer && (
-          <button type="button" className="icon-btn" onClick={p.onRescan} disabled={running} aria-label="Quellen neu prüfen" title="Quellen neu prüfen">
+          <button type="button" className="icon-btn" onClick={p.onRescan} disabled={running} aria-label="Quellen neu suchen" title="Quellen neu suchen">
             <Icon name="refresh" size={17} />
           </button>
         )}
       </header>
+      <p className="scan-intro">
+        {p.sniffer
+          ? 'Flimmer fragt alle Anbieter und spielt die beste Quelle von selbst. Klick eine andere an, wenn es ruckelt.'
+          : 'Hier stehen die Quellen, die die Flimmer-App schon gefunden hat. Klick eine an, um sie zu spielen.'}
+      </p>
 
+      <details className="filters-box">
+        <summary className="filters-summary">
+          <Icon name="sliders" size={16} />
+          <span className="filters-summary-text">
+            <span className="filters-summary-label">Automatische Auswahl</span>
+            <span className="filters-summary-value">{summary(filter)}</span>
+          </span>
+          <Icon name="down" size={14} />
+        </summary>
       <div className="filters" role="group" aria-label="Filter für die automatische Auswahl">
         <label className="field">
-          <span className="field-label">Qualität</span>
+          <span className="field-label">Mindestqualität</span>
           <span className="select">
             <select value={filter.min_height} onChange={(e) => setFilter({ min_height: Number(e.target.value) as MinHeight })}>
               {HEIGHTS.map((h) => (
@@ -86,7 +112,7 @@ export default function ScanPanel(p: Props) {
           </span>
         </label>
         <label className="field">
-          <span className="field-label">Sprache</span>
+          <span className="field-label">Tonspur</span>
           <span className="select">
             <select value={filter.audio_lang} onChange={(e) => setFilter({ audio_lang: e.target.value as AudioLang })}>
               {LANGS.map((l) => (
@@ -116,7 +142,7 @@ export default function ScanPanel(p: Props) {
         </label>
         <div className="field field-wide">
           <span className="field-label" id="sort-label">
-            Bevorzugt
+            Bei Gleichstand zählt
           </span>
           <div className="seg" role="radiogroup" aria-labelledby="sort-label">
             {SORTS.map((s) => (
@@ -132,13 +158,19 @@ export default function ScanPanel(p: Props) {
               </button>
             ))}
           </div>
+          {sortHint && <p className="field-hint">{sortHint}</p>}
         </div>
+        <p className="field-hint field-wide">
+          Quellen, die nicht passen, bleiben in der Liste und lassen sich weiter anklicken. Vorladen: so viele Minuten legt
+          Flimmer vorab auf die Festplatte, damit nichts ruckelt.
+        </p>
         {p.saveFailed && (
           <p className="field-error" role="alert">
             Der Filter konnte nicht gespeichert werden und gilt nur für diese Sitzung.
           </p>
         )}
       </div>
+      </details>
 
       {p.manual && best && (
         <button type="button" className="scan-auto" onClick={p.onAuto}>
@@ -161,12 +193,20 @@ export default function ScanPanel(p: Props) {
             const f = fit(r, filter)
             const isActive = r.provider_id === p.active
             const langs = [...new Set(r.audio.map((a) => langCode(a.lang)).filter((x): x is string => x !== null))]
+            const details = [
+              formatBitrate(r.max_bandwidth) && `Datenrate ${formatBitrate(r.max_bandwidth)}`,
+              formatMs(r.ms) && `geantwortet nach ${formatMs(r.ms)}`,
+              r.subtitles.length > 0 && `${r.subtitles.length} Untertitel`,
+            ]
+              .filter(Boolean)
+              .join(' · ')
             return (
               <li key={r.provider_id}>
                 <button
                   type="button"
                   className={`source is-ok${isActive ? ' is-active' : ''}${f.height && f.lang ? '' : ' is-off'}`}
                   aria-pressed={isActive}
+                  title={details || undefined}
                   onClick={() => p.onPick(r.provider_id)}
                 >
                   <span className="source-main">
@@ -179,42 +219,43 @@ export default function ScanPanel(p: Props) {
                     ) : r.provider_id === best ? (
                       <span className="tag">Beste Wahl</span>
                     ) : !(f.height && f.lang) ? (
-                      <span className="tag tag-dim">außerhalb des Filters</span>
+                      <span className="tag tag-dim">passt nicht zum Filter</span>
                     ) : null}
                   </span>
                   <span className="source-facts">
-                    <span className={`fact fact-quality${f.height ? '' : ' is-miss'}`}>{formatHeight(r.max_height) ?? 'Auflösung unbekannt'}</span>
-                    {formatBitrate(r.max_bandwidth) && <span className="fact">{formatBitrate(r.max_bandwidth)}</span>}
+                    <span className={`fact fact-quality${f.height ? '' : ' is-miss'}`}>{formatHeight(r.max_height) ?? 'Qualität unbekannt'}</span>
                     {langs.length > 0 && <span className={`fact${f.lang ? '' : ' is-miss'}`}>{langs.slice(0, 4).join(' ')}</span>}
-                    {r.subtitles.length > 0 && <span className="fact">UT</span>}
-                    {formatMs(r.ms) && <span className="fact fact-ms">{formatMs(r.ms)}</span>}
+                    {r.subtitles.length > 0 && <span className="fact">Untertitel</span>}
                   </span>
                 </button>
               </li>
             )
           })}
-          {rest.map((r) => (
-            <li key={r.provider_id}>
-              <div className={`source is-${r.status}`}>
-                <span className="source-main">
-                  <span className="source-name">{r.name}</span>
-                  {r.status === 'running' && <span className="bars" aria-hidden="true" />}
-                </span>
-                <span className="source-facts">
-                  <span className="fact">
-                    {r.status === 'running'
-                      ? 'wird geprüft'
-                      : r.status === 'pending'
-                        ? 'wartet'
-                        : r.status === 'no_stream'
-                          ? 'kein Stream gefunden'
-                          : (r.error ?? 'Fehler bei der Prüfung')}
-                  </span>
-                </span>
-              </div>
-            </li>
-          ))}
+          {ranked.length === 0 && running && <li className="scan-empty">Noch keine Quelle gefunden.</li>}
         </ol>
+      )}
+
+      {waiting.length > 0 && (
+        <p className="scan-waiting">
+          <span className="bars" aria-hidden="true" />
+          {waiting.length === 1 ? 'Ein Anbieter wird noch gefragt' : `${waiting.length} Anbieter werden noch gefragt`}
+        </p>
+      )}
+      {failed.length > 0 && (
+        <details className="scan-failed">
+          <summary>
+            {failed.length === 1 ? '1 Anbieter ohne Stream' : `${failed.length} Anbieter ohne Stream`}
+            <Icon name="down" size={14} />
+          </summary>
+          <ul>
+            {failed.map((r) => (
+              <li key={r.provider_id} className={`source is-${r.status}`}>
+                <span className="source-name">{r.name}</span>
+                <span className="fact">{r.status === 'no_stream' ? 'nichts gefunden' : (r.error ?? 'Fehler')}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </aside>
   )
