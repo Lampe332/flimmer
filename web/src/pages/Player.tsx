@@ -123,16 +123,26 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const chosen = manual ?? locked
   const active = chosen ? results.find((r) => r.provider_id === chosen && r.status === 'ok' && r.stream_id) : undefined
 
-  // Automatic choice: once every provider has answered, take the best match and stay on it.
+  // Automatic choice: start quickly with the best result so far (after 8 s of scanning or when the scan is done),
+  // then upgrade automatically while the scan is still running if a better one arrives. Manual choice always wins.
+  const [early, setEarly] = useState(false)
   useEffect(() => {
-    if (!settled) return
+    setEarly(false)
+    if (!running) return
+    const t = setTimeout(() => setEarly(true), 8000)
+    return () => clearTimeout(t)
+  }, [running, scanKey])
+  useEffect(() => {
+    if (!settled && !early) return
     if (chosen && !active) {
       setManual(null)
       setLocked(null)
     } else if (!chosen && best) {
       setLocked(best.provider_id)
+    } else if (!manual && running && best && locked && best.provider_id !== locked) {
+      setLocked(best.provider_id)
     }
-  }, [settled, chosen, active, best])
+  }, [settled, early, running, chosen, active, best, manual, locked])
 
   const onSettings = (next: Settings) => {
     setDraft(next)
@@ -197,6 +207,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
               <VideoPlayer
                 key={active.stream_id}
                 streamId={active.stream_id}
+                kind={active.kind}
                 variants={active.variants}
                 title={d?.title ?? ''}
                 subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}

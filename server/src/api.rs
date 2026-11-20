@@ -12,6 +12,9 @@ use serde_json::{Value, json};
 
 use crate::{
     db::Db,
+    scan::{self, Scans},
+    sniff::Sniffer,
+    stream::{self, Streams},
     error::{ApiError, ApiResult},
     model::{self, Details, Genre, Item, MediaType, Page, SeasonDetails},
     tmdb::{TTL_LIST, TTL_TITLE, Tmdb},
@@ -30,6 +33,10 @@ pub struct AppState {
     pub tmdb: Tmdb,
     pub db: Db,
     pub providers: Vec<Provider>,
+    /// Only present inside the desktop app.
+    pub sniffer: Option<Arc<dyn Sniffer>>,
+    pub scans: Scans,
+    pub streams: Streams,
 }
 
 type St = State<Arc<AppState>>;
@@ -47,6 +54,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/sources/{type}/{id}", get(sources))
         .route("/api/watchlist", get(watchlist_list))
         .route("/api/watchlist/{type}/{id}", axum::routing::put(watchlist_put).delete(watchlist_delete))
+        .route("/api/caps", get(scan::caps))
+        .route("/api/scan/{type}/{id}", get(scan::get).post(scan::start))
+        .route("/api/stream/{id}/master.m3u8", get(stream::master))
+        .route("/api/stream/{id}/r", get(stream::resource))
+        .route("/api/stream/{id}/prefetch", axum::routing::post(stream::prefetch))
+        .route("/api/stream/{id}/buffer", get(stream::buffer))
+        .route("/api/stream/{id}", axum::routing::delete(stream::delete))
+        .route("/api/settings", get(scan::settings_get).put(scan::settings_put))
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .with_state(state)
@@ -199,29 +214,45 @@ async fn season(
 }
 
 #[derive(Serialize)]
-struct Source {
-    id: String,
-    name: String,
-    no_ads: bool,
-    url: String,
+pub struct Source {
+    pub id: String,
+    pub name: String,
+    pub no_ads: bool,
+    pub url: String,
 }
 
-async fn sources(
-    State(st): St,
-    Path((ty, id)): Path<(String, String)>,
-    Query(q): Params,
-) -> ApiResult<Json<Vec<Source>>> {
-    let kind = media_type(&ty)?;
-    let id = numeric_id(&id)?;
-    let (s, e) = match kind {
-        MediaType::Movie => (None, None),
+/// A movie or one episode, as addressed by `/:type/:id?s=&e=`.
+pub struct TitleRef {
+    kind: MediaType,
+    id: u64,
+    episode: Option<(u32, u32)>,
+}
+
+impl TitleRef {
+    pub fn key(&self) -> String {
+        match self.episode {
+            Some((s, e)) => format!("{}:{}:{s}:{e}", self.kind.as_str(), self.id),
+            None => format!("{}:{}", self.kind.as_str(), self.id),
+        }
+    }
+}
+
+pub fn title_ref(ty: &str, id: &str, q: &HashMap<String, String>) -> ApiResult<TitleRef> {
+    let kind = media_type(ty)?;
+    let id = numeric_id(id)?;
+    let episode = match kind {
+        MediaType::Movie => None,
         MediaType::Tv => {
-            let s = small_num(&q, "s")?.ok_or_else(|| ApiError::bad_request("'s' is required for tv"))?;
-            let e = small_num(&q, "e")?.ok_or_else(|| ApiError::bad_request("'e' is required for tv"))?;
-            (Some(s), Some(e))
+            let s = small_num(q, "s")?.ok_or_else(|| ApiError::bad_request("'s' is required for tv"))?;
+            let e = small_num(q, "e")?.ok_or_else(|| ApiError::bad_request("'e' is required for tv"))?;
+            Some((s, e))
         }
     };
+    Ok(TitleRef { kind, id, episode })
+}
 
+pub async fn build_sources(st: &AppState, t: &TitleRef) -> ApiResult<Vec<Source>> {
+    let (kind, id) = (t.kind, t.id);
     let template = |p: &Provider| -> String {
         match kind {
             MediaType::Movie => p.movie.clone(),
@@ -236,7 +267,7 @@ async fn sources(
         None
     };
 
-    let out = st
+    Ok(st
         .providers
         .iter()
         .filter_map(|p| {
@@ -244,13 +275,20 @@ async fn sources(
             if url.contains("{imdb}") {
                 url = url.replace("{imdb}", imdb.as_deref()?);
             }
-            if let (Some(s), Some(e)) = (s, e) {
+            if let Some((s, e)) = t.episode {
                 url = url.replace("{s}", &s.to_string()).replace("{e}", &e.to_string());
             }
             Some(Source { id: p.id.clone(), name: p.name.clone(), no_ads: p.no_ads, url })
         })
-        .collect();
-    Ok(Json(out))
+        .collect())
+}
+
+async fn sources(
+    State(st): St,
+    Path((ty, id)): Path<(String, String)>,
+    Query(q): Params,
+) -> ApiResult<Json<Vec<Source>>> {
+    build_sources(&st, &title_ref(&ty, &id, &q)?).await.map(Json)
 }
 
 async fn watchlist_list(State(st): St) -> ApiResult<Json<Vec<Item>>> {

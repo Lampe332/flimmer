@@ -83,6 +83,8 @@ export interface ScanResult {
   subtitles: Track[]
   stream_id: string | null
   error: string | null
+  /** "mp4" streams are a single file: played natively, no prefetch. */
+  kind?: 'hls' | 'mp4'
 }
 
 export interface Scan {

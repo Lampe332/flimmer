@@ -10,6 +10,8 @@ import { Flicker } from '../States'
 
 type Props = {
   streamId: string
+  /** "mp4" = single file, played natively without hls.js and without prefetch. */
+  kind?: 'hls' | 'mp4'
   /** Variants as the server lists them (best first); needed to address the prefetch. */
   variants: Variant[]
   title: string
@@ -28,7 +30,7 @@ type MenuId = 'quality' | 'audio' | 'subs'
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const IDLE_MS = 2800
 
-export default function VideoPlayer({ streamId, variants, title, subtitle, startAt, onTime, onExpired, next }: Props) {
+export default function VideoPlayer({ streamId, kind, variants, title, subtitle, startAt, onTime, onExpired, next }: Props) {
   const wrap = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
   const bar = useRef<HTMLDivElement>(null)
@@ -68,7 +70,7 @@ export default function VideoPlayer({ streamId, variants, title, subtitle, start
     window.clearTimeout(prefetchTimer.current)
     prefetchTimer.current = window.setTimeout(() => {
       const el = video.current
-      if (!el) return
+      if (!el || kind === 'mp4') return
       const hls = hlsRef.current
       const lv = hls ? hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel] : undefined
       const index = lv ? variantIndex(live.current.variants, lv.height, lv.bitrate) : 0
@@ -80,7 +82,7 @@ export default function VideoPlayer({ streamId, variants, title, subtitle, start
         })
         .catch(() => setPrefetching(false))
     }, 600)
-  }, [streamId, qc])
+  }, [streamId, kind, qc])
   const prefetchRef = useRef(requestPrefetch)
   prefetchRef.current = requestPrefetch
 
@@ -122,7 +124,9 @@ export default function VideoPlayer({ streamId, variants, title, subtitle, start
         .catch(() => !disposed && setFatal('Der Flimmer-Server ist nicht erreichbar.'))
     }
 
-    if (Hls.isSupported()) {
+    if (kind === 'mp4') {
+      playNative()
+    } else if (Hls.isSupported()) {
       const h = new Hls({ startPosition: from > 0 ? from : -1, maxBufferLength: 30, backBufferLength: 60 })
       hls = h
       hlsRef.current = h

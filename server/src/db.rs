@@ -11,7 +11,29 @@ use crate::{
     model::{Item, MediaType},
 };
 
-/// SQLite-backed watchlist. Queries are tiny, so a mutex around one connection is enough.
+/// JSON blob tables next to the watchlist (same shape: key, data, updated_at).
+#[derive(Clone, Copy)]
+pub enum Table {
+    Scans,
+    Streams,
+    Settings,
+}
+
+impl Table {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Scans => "scans",
+            Self::Streams => "streams",
+            Self::Settings => "settings",
+        }
+    }
+}
+
+pub fn now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// SQLite-backed store. Queries are tiny, so a mutex around one connection is enough.
 pub struct Db {
     conn: Mutex<Connection>,
 }
@@ -27,7 +49,10 @@ impl Db {
                  data     TEXT    NOT NULL,
                  added_at INTEGER NOT NULL,
                  PRIMARY KEY (type, id)
-             );",
+             );
+             CREATE TABLE IF NOT EXISTS scans    (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS streams  (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);",
         )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -54,7 +79,7 @@ impl Db {
 
     pub fn put(&self, item: &Item) -> ApiResult<()> {
         let data = serde_json::to_string(item).map_err(|_| ApiError::internal("could not encode item"))?;
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let now = now_ms();
         self.lock()
             .execute(
                 "INSERT INTO watchlist (type, id, data, added_at) VALUES (?1, ?2, ?3, ?4)
@@ -69,6 +94,38 @@ impl Db {
         self.lock()
             .execute("DELETE FROM watchlist WHERE type = ?1 AND id = ?2", params![kind.as_str(), id as i64])
             .map_err(db_err)?;
+        Ok(())
+    }
+
+    pub fn blob_get(&self, table: Table, key: &str) -> ApiResult<Option<String>> {
+        let sql = format!("SELECT data FROM {} WHERE key = ?1", table.name());
+        match self.lock().query_row(&sql, params![key], |r| r.get::<_, String>(0)) {
+            Ok(data) => Ok(Some(data)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(db_err(e)),
+        }
+    }
+
+    pub fn blob_put(&self, table: Table, key: &str, data: &str) -> ApiResult<()> {
+        let sql = format!(
+            "INSERT INTO {} (key, data, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
+            table.name()
+        );
+        self.lock().execute(&sql, params![key, data, now_ms()]).map_err(db_err)?;
+        Ok(())
+    }
+
+    pub fn blob_delete(&self, table: Table, key: &str) -> ApiResult<()> {
+        let sql = format!("DELETE FROM {} WHERE key = ?1", table.name());
+        self.lock().execute(&sql, params![key]).map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Drops rows not written since `before_ms`.
+    pub fn blob_prune(&self, table: Table, before_ms: i64) -> ApiResult<()> {
+        let sql = format!("DELETE FROM {} WHERE updated_at < ?1", table.name());
+        self.lock().execute(&sql, params![before_ms]).map_err(db_err)?;
         Ok(())
     }
 }

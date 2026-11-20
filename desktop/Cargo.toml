@@ -1,0 +1,20 @@
+[package]
+name = "flimmer-desktop"
+version = "0.2.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "Flimmer"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+flimmer = { path = "../server" }
+tauri = "2"
+tokio = { version = "1", features = ["sync", "time"] }
+url = "2"
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_WindowsAndMessaging"] }

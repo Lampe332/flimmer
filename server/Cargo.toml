@@ -1,23 +1,24 @@
 [package]
 name = "flimmer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
+# Standalone server for browser access (no stream sniffer). The desktop app is `Flimmer.exe`.
 [[bin]]
-name = "flimmer"
+name = "flimmer-server"
 path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
-
-[profile.release]
-lto = "thin"
-codegen-units = 4
-strip = true
+futures-util = { version = "0.3", default-features = false }
+url = "2"
