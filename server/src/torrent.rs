@@ -363,7 +363,9 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
     let (bytes, seen) = match known {
         Some(bytes) => (Bytes::from(bytes), Vec::new()),
         None => {
-            let magnet = format!("magnet:?xt=urn:btih:{}", e.id);
+            // For a magnet the engine only uses the trackers inside the link (`opts.trackers` is ignored).
+            let shim: String = url::form_urlencoded::byte_serialize(shim_url().as_bytes()).collect();
+            let magnet = format!("magnet:?xt=urn:btih:{}&tr={shim}", e.id);
             let opts = AddTorrentOptions {
                 list_only: true,
                 trackers: trackers.clone(),
@@ -651,6 +653,8 @@ async fn resume_entry(st: &Arc<AppState>, e: &Arc<Entry>) {
     }
     match e.handle() {
         Some(h) if was_paused || h.is_paused() => {
+            // Tunnel first: peers dialled while it is still down fail at once and sit out a ~10 s backoff.
+            let _ = st.torrents.vpn.ensure_up().await;
             st.torrents.start_announcer(e);
             let _ = st.torrents.session.unpause(&h).await;
         }
