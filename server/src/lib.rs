@@ -9,10 +9,12 @@ mod dht;
 mod error;
 mod hls;
 mod model;
+pub mod paths;
 mod play;
 mod progress;
 mod release;
 mod scan;
+pub mod setup;
 pub mod sniff;
 mod stream;
 mod tmdb;
@@ -43,13 +45,22 @@ pub const DEFAULT_PORT: u16 = 43300;
 const DEV_ORIGIN: &str = "http://localhost:5173";
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Legacy `config.json` (installs before 1.0). Optional now: the token lives in the database, set by the
+/// first-run setup; an old file's token is copied over once.
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default)]
     tmdb_read_token: String,
     #[serde(default = "default_language")]
     language: String,
     #[serde(default = "default_region")]
     region: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self { tmdb_read_token: String::new(), language: default_language(), region: default_region() }
+    }
 }
 
 fn default_language() -> String {
@@ -61,8 +72,10 @@ fn default_region() -> String {
 }
 
 pub struct Options {
-    /// Folder with `config.json`, `providers.json`, `data/` and `web/dist`.
+    /// Read-only resources: `providers.json`, `web/dist`, `tools/` (see [`paths`]).
     pub root: PathBuf,
+    /// Per-user data: `data/` below it, plus an optional legacy `config.json`. Development: same as `root`.
+    pub home: PathBuf,
     pub port: u16,
     pub sniffer: Option<Arc<dyn sniff::Sniffer>>,
 }
@@ -74,15 +87,30 @@ pub struct Server {
     pub url: String,
 }
 
-fn load_config(root: &Path) -> Result<Config, String> {
-    let path = root.join("config.json");
+/// The legacy `config.json` in `home` (else `root`), or defaults when there is none.
+/// A file that is not valid JSON still stops the start, so a typo does not silently drop the token.
+fn load_config(root: &Path, home: &Path) -> Result<Config, String> {
+    let Some(path) = [home, root].iter().map(|d| d.join("config.json")).find(|p| p.is_file()) else {
+        return Ok(Config::default());
+    };
     let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     // Deliberately do not include serde's message: it could quote parts of the token.
-    let cfg: Config = serde_json::from_str(&text).map_err(|_| format!("{} is not valid config JSON", path.display()))?;
-    if cfg.tmdb_read_token.trim().is_empty() {
-        return Err(format!("tmdb_read_token is empty in {}", path.display()));
+    serde_json::from_str(&text).map_err(|_| format!("{} is not valid config JSON", path.display()))
+}
+
+/// The token to use: the stored one, else a real one from a legacy `config.json` (copied into the database once).
+fn initial_token(db: &db::Db, cfg: &Config) -> String {
+    if let Some(t) = setup::stored_token(db) {
+        return t;
     }
-    Ok(cfg)
+    let legacy = cfg.tmdb_read_token.trim();
+    if legacy.is_empty() || legacy.starts_with("PUT_YOUR") {
+        return String::new();
+    }
+    let _ = setup::store_token(db, legacy);
+    // An install from before the first-run flow: it is set up already, so no onboarding and no tour.
+    setup::mark_set_up(db);
+    legacy.to_owned()
 }
 
 fn load_providers(root: &Path) -> Result<Vec<api::Provider>, String> {
@@ -103,10 +131,11 @@ fn web_service(root: &Path) -> Router {
 
 /// Loads config and data, cleans old cache and binds `127.0.0.1:port`.
 pub async fn bind(opts: Options) -> Result<Server, String> {
-    let cfg = load_config(&opts.root)?;
+    paths::init(&opts.root, &opts.home);
+    let cfg = load_config(&opts.root, &opts.home)?;
     let providers = load_providers(&opts.root)?;
 
-    let data_dir = opts.root.join("data");
+    let data_dir = paths::data();
     let cache_dir = data_dir.join("cache");
     std::fs::create_dir_all(&cache_dir).map_err(|e| format!("cannot create {}: {e}", cache_dir.display()))?;
     let db_path = data_dir.join("flimmer.db");
@@ -119,10 +148,12 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         let _ = db.blob_prune(table, db::now_ms() - DAY_MS);
     }
 
-    let torrents = torrent::Torrents::new(opts.root.clone(), opts.port, &torrent::initial_settings(&db, &opts.root)).await?;
+    // The engine keeps its state below `<home>/data` (torrents, default VPN file).
+    let torrents = torrent::Torrents::new(opts.home.clone(), opts.port, &torrent::initial_settings(&db, &opts.home)).await?;
 
+    let token = initial_token(&db, &cfg);
     let state = Arc::new(api::AppState {
-        tmdb: tmdb::Tmdb::new(cfg.tmdb_read_token, cfg.language, cfg.region),
+        tmdb: tmdb::Tmdb::new(token, cfg.language, cfg.region),
         db,
         providers,
         sniffer: opts.sniffer,
@@ -131,6 +162,9 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         torrents,
         autodl: autodl::JobState::default(),
     });
+    if let Ok(s) = scan::load_settings(&state) {
+        state.scans.set_parallel(s.parallel as usize);
+    }
     torrent::spawn_manager(state.clone());
     autodl::spawn(state.clone());
 
@@ -139,7 +173,7 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         .allow_methods([Method::GET, Method::PUT, Method::POST, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE]);
 
-    let app = api::router(state).merge(web_service(&opts.root)).layer(cors);
+    let app = setup::router(state.clone()).merge(api::router(state)).merge(web_service(&opts.root)).layer(cors);
 
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, opts.port));
     let listener = tokio::net::TcpListener::bind(addr)

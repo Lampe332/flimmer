@@ -1,5 +1,10 @@
-//! Flimmer desktop app: runs the Flimmer server in-process on 127.0.0.1:43300 (`--port` to change), gives it a
-//! stream sniffer (hidden WebView2 windows) and shows the web UI in the main window.
+//! Flimmer desktop app: runs the Flimmer server in-process on 127.0.0.1 (43300, or the next free port; `--port`
+//! pins one), gives it a stream sniffer (hidden WebView2 windows) and shows the web UI in the main window.
+//!
+//! Folders (see `flimmer::paths`): resources next to the exe when installed, else `--root` or the first folder
+//! above the exe with `providers.json` (development). Per-user data: `--data`, else `%LOCALAPPDATA%\<identifier>`
+//! when installed (the folder the uninstaller offers to delete; `%LOCALAPPDATA%\Flimmer` is the install folder),
+//! else the resource folder (development, as before).
 
 #![allow(non_snake_case)] // binary name `Flimmer`
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -24,7 +29,7 @@ use windows::{
     core::HSTRING,
 };
 
-/// Line log in `data\logs\desktop.log` (rewritten on every start).
+/// Line log in `<home>\data\logs\desktop.log` (rewritten on every start).
 #[derive(Clone)]
 pub struct Log {
     file: Arc<Mutex<Option<File>>>,
@@ -48,30 +53,61 @@ impl Log {
     }
 }
 
-/// `--root <dir>`, else the first folder above the exe that holds `providers.json`.
-fn find_root() -> Option<PathBuf> {
+/// The value after `flag`, if given.
+fn arg(flag: &str) -> Option<String> {
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        if a == "--root" {
-            return args.next().map(PathBuf::from);
+        if a == flag {
+            return args.next();
         }
     }
-    let exe = std::env::current_exe().ok()?;
-    exe.ancestors().skip(1).find(|d| d.join("providers.json").is_file()).map(Path::to_path_buf)
+    None
 }
 
-/// `--port <n>`, else the default port.
-fn find_port() -> Result<u16, String> {
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        if a == "--port" {
-            return args
-                .next()
-                .and_then(|p| p.parse().ok())
-                .ok_or_else(|| "--port braucht eine Zahl zwischen 1 und 65535.".to_owned());
-        }
+/// Resources and per-user data folder: `(root, home)`.
+fn find_folders(identifier: &str) -> Option<(PathBuf, PathBuf)> {
+    let data = arg("--data").map(PathBuf::from);
+    if let Some(root) = arg("--root").map(PathBuf::from) {
+        return Some((root.clone(), data.unwrap_or(root)));
     }
-    Ok(flimmer::DEFAULT_PORT)
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?.to_path_buf();
+    if exe_dir.join("providers.json").is_file() {
+        // Installed: resources sit next to the exe, data goes to the user's local app data.
+        let home = data.or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join(identifier)))?;
+        return Some((exe_dir, home));
+    }
+    let root = exe.ancestors().skip(1).find(|d| d.join("providers.json").is_file())?.to_path_buf();
+    Some((root.clone(), data.unwrap_or(root)))
+}
+
+fn port_free(port: u16) -> bool {
+    std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
+/// `--port <n>` as given. Else the port of the last start (so the page keeps its origin), else 43300, else the
+/// next free one up to 43399. Another program (or a second Flimmer with other data) on 43300 is no problem.
+fn find_port(port_file: &Path) -> Result<u16, String> {
+    if let Some(p) = arg("--port") {
+        return p.parse().map_err(|_| "--port braucht eine Zahl zwischen 1 und 65535.".to_owned());
+    }
+    let last = std::fs::read_to_string(port_file).ok().and_then(|s| s.trim().parse::<u16>().ok());
+    let base = flimmer::DEFAULT_PORT;
+    let port = pick_port(last, base..base + 100).ok_or("Kein freier Port zwischen 43300 und 43399.")?;
+    let _ = std::fs::write(port_file, port.to_string());
+    Ok(port)
+}
+
+/// The last port if it is free, else the first free one in `range`.
+fn pick_port(last: Option<u16>, range: std::ops::Range<u16>) -> Option<u16> {
+    last.into_iter().chain(range).find(|&p| port_free(p))
+}
+
+/// Held for the whole run: a second start with the same data folder would share the database and torrents.
+fn lock_data(data: &Path) -> Option<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    let _ = std::fs::create_dir_all(data);
+    std::fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(data.join("flimmer.lock")).ok()
 }
 
 /// Set once the main window started closing; a second click on the X closes at once.
@@ -95,12 +131,26 @@ fn extensions(root: &Path) -> Option<PathBuf> {
 }
 
 fn main() {
-    let Some(root) = find_root() else {
+    let context = tauri::generate_context!();
+    let Some((root, home)) = find_folders(&context.config().identifier) else {
         fail("Flimmer-Ordner nicht gefunden (providers.json fehlt). Start mit --root <Ordner>.")
     };
-    let port = find_port().unwrap_or_else(|e| fail(&e));
-    let log = Log::open(&root.join("data").join("logs").join("desktop.log"));
-    let webview_data = root.join("data").join("webview");
+    let data = home.join("data");
+    let Some(_lock) = lock_data(&data) else {
+        fail("Flimmer läuft schon. Schau in der Taskleiste nach dem offenen Fenster.
+
+Flimmer is already running. Look for its window in the taskbar.")
+    };
+    let port = find_port(&data.join("port")).unwrap_or_else(|e| fail(&e));
+    let log = Log::open(&data.join("logs").join("desktop.log"));
+    let webview_data = data.join("webview");
+    // "Cache leeren" in the settings: the source-search profile is only free before its windows exist.
+    let marker = data.join(flimmer::setup::CLEAR_SCAN_PROFILE);
+    if marker.is_file() {
+        let _ = std::fs::remove_dir_all(webview_data.join("scan"));
+        let _ = std::fs::remove_file(&marker);
+        log.line("cleared the source-search browser profile");
+    }
 
     tauri::Builder::default()
         .setup(move |app| {
@@ -114,6 +164,7 @@ fn main() {
             sniffer.warm();
             let opts = flimmer::Options {
                 root: root.clone(),
+                home: home.clone(),
                 port,
                 sniffer: Some(Arc::new(sniffer)),
             };
@@ -164,6 +215,25 @@ fn main() {
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("tauri run failed");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn busy_ports_are_skipped() {
+        // Another program holds a port: the pick moves on to the next free one.
+        let busy = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let p = busy.local_addr().unwrap().port();
+        assert!(!port_free(p));
+        let picked = pick_port(Some(p), p..p.saturating_add(20)).unwrap();
+        assert_ne!(picked, p);
+        assert!(picked > p);
+        // A free last port is kept, so the page keeps its origin (and its browser storage).
+        drop(busy);
+        assert_eq!(pick_port(Some(p), p.saturating_add(1)..p.saturating_add(20)), Some(p));
+    }
 }

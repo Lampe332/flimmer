@@ -1,7 +1,32 @@
 {
   "productName": "Flimmer",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "identifier": "local.flimmer.desktop",
   "app": { "windows": [], "security": { "csp": null } },
-  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["../assets/brand/app-icon.ico"],
+    "shortDescription": "Flimmer",
+    "longDescription": "Local movie and TV app",
+    "resources": {
+      "../web/dist/": "web/dist/",
+      "../providers.json": "providers.json",
+      "../tools/ffmpeg/bin/ffmpeg.exe": "tools/ffmpeg/bin/ffmpeg.exe",
+      "../tools/ffmpeg/bin/ffprobe.exe": "tools/ffmpeg/bin/ffprobe.exe",
+      "../tools/ffmpeg/LICENSE": "tools/ffmpeg/LICENSE",
+      "extensions/ubol/": "desktop/extensions/ubol/",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "../assets/brand/app-icon.ico",
+        "languages": ["English", "German", "French", "Spanish", "Italian", "PortugueseBR", "Russian", "Polish", "Turkish", "Japanese", "SimpChinese", "Korean"],
+        "displayLanguageSelector": false,
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
+  }
 }

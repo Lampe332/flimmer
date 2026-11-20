@@ -1,3 +1,5 @@
+import { getPrefs } from './prefs'
+
 const VOLUME_KEY = 'flimmer.volume'
 
 function read(key: string): string | null {
@@ -18,8 +20,10 @@ function write(key: string, value: string): void {
 
 export type VolumePref = { volume: number; muted: boolean }
 
+/** The last volume when "remember volume" is on, else the default volume from the settings. */
 export function getVolume(): VolumePref {
-  const raw = read(VOLUME_KEY)
+  const prefs = getPrefs()
+  const raw = prefs.rememberVolume ? read(VOLUME_KEY) : null
   if (raw) {
     try {
       const v = JSON.parse(raw) as Partial<VolumePref>
@@ -30,9 +34,9 @@ export function getVolume(): VolumePref {
       /* fall through to the default */
     }
   }
-  return { volume: 1, muted: false }
+  return { volume: prefs.volume, muted: false }
 }
 
 export function setVolume(pref: VolumePref): void {
-  write(VOLUME_KEY, JSON.stringify(pref))
+  if (getPrefs().rememberVolume) write(VOLUME_KEY, JSON.stringify(pref))
 }

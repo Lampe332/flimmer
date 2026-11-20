@@ -16,6 +16,8 @@ import { formatBitrate, formatClock, formatHeight, langCode, trackLabel } from '
 import { variantIndex } from '../../lib/pick'
 import { playUrl, type AudioInfo } from '../../lib/torrents'
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
+import { PLAYER_KEYS } from '../../lib/keys'
+import { getPrefs, matchesLang, usePrefs } from '../../lib/prefs'
 import Icon, { type IconName } from '../Icon'
 import { Flicker } from '../States'
 
@@ -113,22 +115,12 @@ const IDLE_MS = 2800
 const SAVE_EVERY_MS = 10_000
 /** Credits shortcut: offer the next episode this many seconds before the end. */
 const UP_NEXT_S = 30
-const UP_NEXT_COUNTDOWN = 8
 const HINT_MS = 8000
 /** A second click within this time is a double click (fullscreen), so the first one must not toggle playback. */
 const DBL_MS = 240
 
-/** Shortcut overview: keys (a text key or the literal keys) and what they do. */
-const KEYS: { id: string; keys: Key | string; what: Key }[] = [
-  { id: 'play', keys: 'vp.keyPlayKeys', what: 'vp.keyPlay' },
-  { id: 'seek', keys: '← / →', what: 'vp.keySeek' },
-  { id: 'volume', keys: '↑ / ↓', what: 'vp.keyVolume' },
-  { id: 'mute', keys: 'M', what: 'vp.keyMute' },
-  { id: 'full', keys: 'vp.keyFullscreenKeys', what: 'vp.fullscreen' },
-  { id: 'subs', keys: 'C', what: 'vp.keySubs' },
-  { id: 'next', keys: 'N', what: 'player.nextEpisode' },
-  { id: 'help', keys: '?', what: 'vp.keyHelp' },
-]
+/** Shortcut overview (shared with the help page). */
+const KEYS = PLAYER_KEYS
 type Fatal = 'vp.streamLoad' | 'api.offline' | 'vp.noData' | 'vp.cantPlay' | 'vp.browserCant'
 
 export default function VideoPlayer({
@@ -361,10 +353,32 @@ export default function VideoPlayer({
         setSub(h.subtitleTrack)
       }
       // State mirrors hls.js itself (no optimistic update), so the menu shows what really plays.
-      h.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncAudio)
+      // Preferred languages from the settings, once per stream; the user's own pick afterwards wins.
+      let audioChosen = false
+      let subsChosen = false
+      h.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+        const want = getPrefs().audioLang
+        if (!audioChosen && want !== 'auto') {
+          const i = h.audioTracks.findIndex((x) => matchesLang(x.lang ?? null, want))
+          if (i >= 0 && i !== h.audioTrack) h.audioTrack = i
+        }
+        audioChosen = true
+        syncAudio()
+      })
+      h.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
+        const want = getPrefs().subLang
+        if (!subsChosen && want !== 'off' && h.subtitleTracks.length > 0) {
+          const i = h.subtitleTracks.findIndex((x) => matchesLang(x.lang ?? null, want))
+          if (i >= 0) {
+            h.subtitleDisplay = true
+            h.subtitleTrack = i
+          }
+          subsChosen = true
+        }
+        syncSubs()
+      })
       h.on(Hls.Events.AUDIO_TRACK_SWITCHING, syncAudio)
       h.on(Hls.Events.AUDIO_TRACK_SWITCHED, syncAudio)
-      h.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, syncSubs)
       h.on(Hls.Events.SUBTITLE_TRACK_SWITCH, syncSubs)
       h.on(Hls.Events.ERROR, (_e, data) => {
         if (data.response?.code === 410) {
@@ -491,10 +505,12 @@ export default function VideoPlayer({
   useEffect(() => () => window.clearTimeout(idleTimer.current), [])
 
   useEffect(() => {
+    // The whole page counts too: "Vollbild beim Abspielen" puts the page in fullscreen on the click that opened it.
     const onChange = () => {
-      setFullscreen(document.fullscreenElement === wrap.current)
+      setFullscreen(!!document.fullscreenElement && [wrap.current, document.documentElement].includes(document.fullscreenElement as HTMLDivElement))
       poke()
     }
+    onChange()
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [poke])
@@ -773,17 +789,19 @@ export default function VideoPlayer({
   }
 
   // ---- up next: countdown card in the last 30 s and at the end ----
+  const { autoNext, autoNextSeconds: countdown } = usePrefs()
   const [upNextOff, setUpNextOff] = useState(false)
-  const [count, setCount] = useState(UP_NEXT_COUNTDOWN)
+  const [count, setCount] = useState(countdown)
   const nearEnd = !!next && started && !fatal && duration > 60 && (ended || duration - time <= UP_NEXT_S)
   const upNext = nearEnd && !upNextOff
-  const ticking = upNext && (playing || ended) && scrub === null
+  // "Nächste Folge automatisch" off: the card still offers the next episode, it just does not count down.
+  const ticking = upNext && autoNext && (playing || ended) && scrub === null
   useEffect(() => {
     if (!nearEnd) setUpNextOff(false)
   }, [nearEnd])
   useEffect(() => {
-    if (!upNext) setCount(UP_NEXT_COUNTDOWN)
-  }, [upNext])
+    if (!upNext) setCount(countdown)
+  }, [upNext, countdown])
   useEffect(() => {
     if (!ticking) return
     const t = window.setInterval(() => setCount((c) => Math.max(0, c - 1)), 1000)
@@ -921,16 +939,18 @@ export default function VideoPlayer({
         <section className="vp-upnext" aria-label={t('player.nextEpisode')}>
           {next.still && <img className="vp-upnext-still" src={next.still} alt="" />}
           <div className="vp-upnext-body">
-            <p className="vp-upnext-kicker">{t('vp.nextIn', { n: count })}</p>
+            <p className="vp-upnext-kicker">{autoNext ? t('vp.nextIn', { n: count }) : t('vp.upNext')}</p>
             <p className="vp-upnext-title">{next.label}</p>
             {next.name && <p className="vp-upnext-name">{next.name}</p>}
             <div className="vp-upnext-actions">
               <button type="button" className="btn btn-primary vp-upnext-go" onClick={next.go}>
-                <span
-                  className="vp-upnext-fill"
-                  aria-hidden="true"
-                  style={{ transform: `scaleX(${(UP_NEXT_COUNTDOWN - count) / UP_NEXT_COUNTDOWN})` }}
-                />
+                {autoNext && (
+                  <span
+                    className="vp-upnext-fill"
+                    aria-hidden="true"
+                    style={{ transform: `scaleX(${(countdown - count) / countdown})` }}
+                  />
+                )}
                 <Icon name="play" size={16} />
                 {t('vp.playNow')}
               </button>

@@ -1,10 +1,14 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from 'react'
-import { Route, Routes, useLocation, useNavigationType } from 'react-router'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router'
 import ErrorBoundary from './components/ErrorBoundary'
 import Footer from './components/Footer'
 import Header from './components/Header'
 import { PageLoader } from './components/States'
+import Tour, { startTour } from './components/Tour'
 import { useI18n } from './i18n'
+import { START_PAGES, getPrefs, loadPrefs } from './lib/prefs'
+import { useSetup } from './lib/setup'
 import Home from './pages/Home'
 
 const Browse = lazy(() => import('./pages/Browse'))
@@ -16,6 +20,9 @@ const History = lazy(() => import('./pages/History'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 const Downloads = lazy(() => import('./pages/Downloads'))
 const TorrentPlay = lazy(() => import('./pages/TorrentPlay'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Help = lazy(() => import('./pages/Help'))
+const Onboarding = lazy(() => import('./pages/Onboarding'))
 
 /** Scroll position per history entry, so "back" lands where you left the page. */
 const positions = new Map<string, number>()
@@ -54,11 +61,57 @@ function ScrollManager() {
   return null
 }
 
+/**
+ * First start (no TMDB token, or setup not finished) and `/einrichtung` show the setup flow instead of the app.
+ * A TMDB call that answers `needs_setup` (token removed by a reset) brings it back.
+ */
+function useSetupGate() {
+  const setup = useSetup()
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { pathname } = useLocation()
+  const [prefsReady, setPrefsReady] = useState(false)
+  const startApplied = useRef(false)
+
+  useEffect(() => {
+    void loadPrefs().then(() => setPrefsReady(true))
+    const onNeeds = () => void qc.invalidateQueries({ queryKey: ['setup'] })
+    window.addEventListener('flimmer:needs-setup', onNeeds)
+    return () => window.removeEventListener('flimmer:needs-setup', onNeeds)
+  }, [qc])
+
+  const needed = !!setup.data && (setup.data.tmdb === 'missing' || !setup.data.onboarded)
+
+  // Start page from the settings, once per app start, only when the app opened on "/".
+  useEffect(() => {
+    if (startApplied.current || !prefsReady || !setup.data || needed) return
+    startApplied.current = true
+    const target = START_PAGES.find((p) => p.id === getPrefs().start)?.path ?? '/'
+    if (pathname === '/' && target !== '/') navigate(target, { replace: true })
+  }, [prefsReady, setup.data, needed, pathname, navigate])
+
+  const finish = async () => {
+    await loadPrefs()
+    await qc.invalidateQueries()
+    navigate('/', { replace: true })
+    if (!getPrefs().tourDone) window.setTimeout(startTour, 400)
+  }
+  return { setup, show: needed || pathname === '/einrichtung', finish }
+}
+
 export default function App() {
   const { pathname } = useLocation()
   // Subscribing here re-renders the whole tree on a language switch.
   const { t } = useI18n()
+  const gate = useSetupGate()
   const immersive = pathname.startsWith('/play/')
+  if (gate.setup.isPending) return <PageLoader />
+  if (gate.show && gate.setup.data)
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Onboarding state={gate.setup.data} onFinish={() => void gate.finish()} />
+      </Suspense>
+    )
   return (
     <div className={`app${immersive ? ' is-immersive' : ''}`}>
       <a href="#main" className="skip-link">
@@ -81,6 +134,8 @@ export default function App() {
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/merkliste" element={<Watchlist />} />
             <Route path="/verlauf" element={<History />} />
+            <Route path="/einstellungen" element={<Settings />} />
+            <Route path="/hilfe" element={<Help />} />
             <Route path="*" element={<NotFound />} />
               </Routes>
             </div>
@@ -88,6 +143,7 @@ export default function App() {
         </ErrorBoundary>
       </main>
       <Footer />
+      <Tour />
     </div>
   )
 }

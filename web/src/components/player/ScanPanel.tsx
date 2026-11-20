@@ -4,6 +4,7 @@ import { useI18n, type Key, type T } from '../../i18n'
 import type { AudioLang, Filter, MinHeight, Scan, ScanResult, Settings, SortKey } from '../../lib/api'
 import { formatBitrate, formatHeight, formatMs, langCode } from '../../lib/format'
 import { fit, rank } from '../../lib/pick'
+import { usePrefs } from '../../lib/prefs'
 import type { TorrentResult, Vpn } from '../../lib/torrents'
 import Icon from '../Icon'
 import { TorrentRow, VpnBadge, VpnNotice } from '../Torrents'
@@ -86,6 +87,8 @@ export default function ScanPanel(p: Props) {
   const best = ranked[0]?.provider_id ?? null
   const waiting = results.filter((r) => r.status === 'pending' || r.status === 'running')
   const failed = results.filter((r) => r.status === 'no_stream' || r.status === 'error').sort((a, z) => ORDER[a.status] - ORDER[z.status])
+  // "Quellen ohne Stream ausblenden": no folded list of providers that came up empty.
+  const { hideFailed } = usePrefs()
   const running = p.scan?.state === 'running'
   const setFilter = (patch: Partial<Filter>) => p.onSettings({ ...p.settings, filter: { ...filter, ...patch } })
   const minutes = PREFETCH.includes(p.settings.prefetch_minutes) ? PREFETCH : [...PREFETCH, p.settings.prefetch_minutes].sort((a, z) => a - z)
@@ -262,7 +265,7 @@ export default function ScanPanel(p: Props) {
           {t('scan.waiting', { n: waiting.length })}
         </p>
       )}
-      {failed.length > 0 && (
+      {failed.length > 0 && !hideFailed && (
         <details className="scan-failed">
           <summary>
             {t('scan.failed', { n: failed.length })}
