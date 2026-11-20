@@ -1,0 +1,5 @@
+config.json
+data/
+target/
+node_modules/
+web/dist/
