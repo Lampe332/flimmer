@@ -3,6 +3,8 @@
   { "id": "cinesrc",    "name": "CineSrc",      "no_ads": true,  "movie": "https://cinesrc.st/embed/movie/{tmdb}",                    "tv": "https://cinesrc.st/embed/tv/{tmdb}?s={s}&e={e}" },
   { "id": "peestream",  "name": "PeeStream",    "no_ads": true,  "movie": "https://providers.peestream.in/embed/?tmdbId={tmdb}&type=movie", "tv": "https://providers.peestream.in/embed/?tmdbId={tmdb}&type=tv&season={s}&episode={e}" },
   { "id": "moviesapi",  "name": "MoviesAPI",    "no_ads": true,  "movie": "https://moviesapi.club/movie/{tmdb}",                      "tv": "https://moviesapi.club/tv/{tmdb}-{s}-{e}" },
+  { "id": "embedbandit", "name": "EmbedBandit", "no_ads": true,  "movie": "https://embedbandit.com/embed/movie?tmdb={tmdb}",       "tv": "https://embedbandit.com/embed/tv?tmdb={tmdb}&season={s}&episode={e}" },
+  { "id": "peachify",   "name": "Peachify",     "no_ads": true,  "movie": "https://peachify.net/embed/movie/{tmdb}",                  "tv": "https://peachify.net/embed/tv/{tmdb}/{s}/{e}" },
   { "id": "vidlink",    "name": "VidLink",      "no_ads": false, "movie": "https://vidlink.pro/movie/{tmdb}",                         "tv": "https://vidlink.pro/tv/{tmdb}/{s}/{e}" },
   { "id": "vidsrcsh",  "name": "VidSrc Embed", "no_ads": false, "movie": "https://vidsrc.sh/embed/movie/{imdb}",                      "tv": "https://vidsrc.sh/embed/tv/{imdb}/{s}/{e}" },
   { "id": "videasy",    "name": "VidEasy",      "no_ads": false, "movie": "https://player.videasy.net/movie/{tmdb}",                  "tv": "https://player.videasy.net/tv/{tmdb}/{s}/{e}" },
@@ -27,5 +29,15 @@
   { "id": "vidsrcsu",   "name": "VidSrc.su",    "no_ads": false, "movie": "https://vidsrc.su/embed/movie/{tmdb}",                     "tv": "https://vidsrc.su/embed/tv/{tmdb}/{s}/{e}" },
   { "id": "vidgod",     "name": "VidGod",       "no_ads": false, "movie": "https://vidsrc.cc/v2/embed/movie/{tmdb}",                  "tv": "https://vidsrc.cc/v2/embed/tv/{tmdb}/{s}/{e}" },
   { "id": "vidsrcme",   "name": "VidSrc.me",    "no_ads": false, "movie": "https://vsembed.ru/embed/movie/{tmdb}",                    "tv": "https://vsembed.ru/embed/tv/{tmdb}/{s}/{e}" },
-  { "id": "1embed",     "name": "1Embed",       "no_ads": false, "movie": "https://1embed.cc/embed/movie/{tmdb}",                     "tv": "https://1embed.cc/embed/tv/{tmdb}/{s}/{e}" }
+  { "id": "1embed",     "name": "1Embed",       "no_ads": false, "movie": "https://1embed.cc/embed/movie/{tmdb}",                     "tv": "https://1embed.cc/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "nxsha",      "name": "NxSha",        "no_ads": false, "movie": "https://web.nxsha.app/embed/movie/{tmdb}",                 "tv": "https://web.nxsha.app/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "vidzen",     "name": "VidZen",       "no_ads": false, "movie": "https://vidzen.fun/movie/{tmdb}",                          "tv": "https://vidzen.fun/tv/{tmdb}/{s}/{e}" },
+  { "id": "vidprime",   "name": "VidPrime",     "no_ads": false, "movie": "https://vidprime.top/movie/{tmdb}",                        "tv": "https://vidprime.top/tv/{tmdb}/{s}/{e}" },
+  { "id": "vidspark",   "name": "VidSpark",     "no_ads": false, "movie": "https://vidspark.to/movie/{tmdb}",                         "tv": "https://vidspark.to/tv/{tmdb}/{s}/{e}" },
+  { "id": "braflix",    "name": "Braflix",      "no_ads": false, "movie": "https://braflix.dev/embed/movie/{tmdb}",                   "tv": "https://braflix.dev/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "viduki",     "name": "Viduki",       "no_ads": false, "movie": "https://www.viduki.net/1/movie/{tmdb}",                    "tv": "https://www.viduki.net/1/tv/{tmdb}/{s}/{e}" },
+  { "id": "tgvid",      "name": "TGVID",        "no_ads": false, "movie": "https://tgvid.lovable.app/embed/movie/{tmdb}",             "tv": "https://tgvid.lovable.app/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "nontongo",   "name": "NontonGo",     "no_ads": false, "movie": "https://nontongo.win/embed/movie/{tmdb}",                  "tv": "https://nontongo.win/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "vidsrcbuzz", "name": "VidSrc Buzz",  "no_ads": false, "movie": "https://vidsrc.buzz/embed/movie/{tmdb}",                   "tv": "https://vidsrc.buzz/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "embedapi",   "name": "Embed-API Stream", "no_ads": false, "movie": "https://watch.embed-api.stream/embed/movie/{tmdb}",   "tv": "https://watch.embed-api.stream/embed/tv/{tmdb}/{s}/{e}" }
 ]
