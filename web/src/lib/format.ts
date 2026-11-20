@@ -27,3 +27,73 @@ export function isUpcoming(iso: string | null): boolean {
   const d = new Date(iso)
   return !Number.isNaN(d.getTime()) && d.getTime() > Date.now()
 }
+
+/** Playback clock: 1:02:03 or 2:03. */
+export function formatClock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const t = Math.floor(seconds)
+  const h = Math.floor(t / 3600)
+  const m = Math.floor((t % 3600) / 60)
+  const s = String(t % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
+}
+
+export function formatHeight(height: number | null): string | null {
+  if (!height) return null
+  return height >= 2160 ? '4K' : `${height}p`
+}
+
+export function formatBitrate(bps: number | null): string | null {
+  if (!bps) return null
+  const mbit = bps / 1_000_000
+  return mbit >= 1
+    ? `${mbit.toLocaleString('de-DE', { maximumFractionDigits: 1 })} Mbit/s`
+    : `${Math.round(bps / 1000)} kbit/s`
+}
+
+export function formatMs(ms: number | null): string | null {
+  if (ms === null) return null
+  return `${(ms / 1000).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
+}
+
+const LANGS: Record<string, string> = {
+  de: 'Deutsch',
+  ger: 'Deutsch',
+  deu: 'Deutsch',
+  en: 'Englisch',
+  eng: 'Englisch',
+  fr: 'Französisch',
+  fre: 'Französisch',
+  fra: 'Französisch',
+  es: 'Spanisch',
+  spa: 'Spanisch',
+  it: 'Italienisch',
+  ita: 'Italienisch',
+  ja: 'Japanisch',
+  jpn: 'Japanisch',
+  ko: 'Koreanisch',
+  kor: 'Koreanisch',
+  tr: 'Türkisch',
+  tur: 'Türkisch',
+  pt: 'Portugiesisch',
+  por: 'Portugiesisch',
+  ru: 'Russisch',
+  rus: 'Russisch',
+}
+
+/** Readable name for a playlist track: its own name, else the language, else a numbered fallback. */
+export function trackLabel(track: { lang?: string | null; name?: string | null }, index: number, kind: string): string {
+  const lang = track.lang ? LANGS[track.lang.toLowerCase()] : undefined
+  const name = track.name?.trim()
+  if (lang && (!name || name.length <= 3)) return lang
+  return name || (track.lang && track.lang !== 'und' ? track.lang.toUpperCase() : `${kind} ${index + 1}`)
+}
+
+/** Short language code for badges: DE, EN, or the raw code. */
+export function langCode(lang: string | null): string | null {
+  if (!lang || lang === 'und') return null
+  const l = lang.toLowerCase()
+  if (['de', 'ger', 'deu'].includes(l)) return 'DE'
+  if (['en', 'eng'].includes(l)) return 'EN'
+  return l.slice(0, 3).toUpperCase()
+}

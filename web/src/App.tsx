@@ -23,8 +23,9 @@ function ScrollToTop() {
 
 export default function App() {
   const { pathname } = useLocation()
+  const immersive = pathname.startsWith('/play/')
   return (
-    <div className="app">
+    <div className={`app${immersive ? ' is-immersive' : ''}`}>
       <a href="#main" className="skip-link">
         Zum Inhalt springen
       </a>
@@ -32,8 +33,9 @@ export default function App() {
       <Header />
       <main id="main" className="main">
         <ErrorBoundary key={pathname}>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
+          <Suspense fallback={<PageLoader />}>
+            <div className="route" key={pathname}>
+              <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/filme" element={<Browse type="movie" />} />
             <Route path="/serien" element={<Browse type="tv" />} />
@@ -42,8 +44,9 @@ export default function App() {
             <Route path="/play/:type/:id" element={<Player />} />
             <Route path="/merkliste" element={<Watchlist />} />
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
+              </Routes>
+            </div>
+          </Suspense>
         </ErrorBoundary>
       </main>
       <Footer />

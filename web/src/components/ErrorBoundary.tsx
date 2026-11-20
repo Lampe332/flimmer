@@ -18,10 +18,13 @@ export default class ErrorBoundary extends Component<Props, State> {
     const chunk = /dynamically imported module|Failed to fetch|Importing a module script failed/i.test(error.message)
     return (
       <div className="state" role="alert">
+        <span className="state-icon is-warn">
+          <Icon name="warn" size={26} />
+        </span>
         <h2>{chunk ? 'Server nicht erreichbar' : 'Diese Seite ist abgestürzt'}</h2>
         <p>
           {chunk
-            ? 'Flimmer konnte diese Seite nicht vom lokalen Server laden. Starte flimmer.exe und lade neu.'
+            ? 'Flimmer konnte diese Seite nicht vom lokalen Server laden. Starte Flimmer neu und lade die Seite noch einmal.'
             : error.message}
         </p>
         <div className="state-actions">

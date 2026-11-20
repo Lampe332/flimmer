@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { ApiError } from '../lib/api'
-import Icon from './Icon'
+import Icon, { type IconName } from './Icon'
+import { Mark } from './Logo'
 
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const { pathname } = useLocation()
@@ -10,7 +11,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   let text = error instanceof Error ? error.message : 'Unbekannter Fehler.'
   if (status === 0) {
     title = 'Server nicht erreichbar'
-    text = 'Flimmer bekommt keine Antwort vom lokalen Server. Starte flimmer.exe und versuche es erneut.'
+    text = 'Flimmer bekommt keine Antwort vom lokalen Server. Starte Flimmer neu und versuche es noch einmal.'
   } else if (status === 404) {
     title = 'Nicht gefunden'
     text = 'Diesen Titel gibt es bei TMDB nicht (mehr).'
@@ -20,6 +21,9 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   }
   return (
     <div className="state" role="alert">
+      <span className="state-icon is-warn">
+        <Icon name="warn" size={26} />
+      </span>
       <h2>{title}</h2>
       <p>{text}</p>
       <div className="state-actions">
@@ -30,7 +34,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
           </button>
         )}
         {pathname !== '/' && (
-          <Link to="/" className="btn btn-ghost">
+          <Link to="/" className="btn btn-glass">
             Zur Startseite
           </Link>
         )}
@@ -39,9 +43,14 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   )
 }
 
-export function EmptyState({ title, text, children }: { title: string; text: string; children?: ReactNode }) {
+type EmptyProps = { title: string; text: string; icon?: IconName; children?: ReactNode }
+
+export function EmptyState({ title, text, icon = 'film', children }: EmptyProps) {
   return (
     <div className="state">
+      <span className="state-icon">
+        <Icon name={icon} size={26} />
+      </span>
       <h2>{title}</h2>
       <p>{text}</p>
       {children && <div className="state-actions">{children}</div>}
@@ -63,10 +72,19 @@ export function CardSkeletons({ count = 8 }: { count?: number }) {
   )
 }
 
+/** The mark, flickering like a lamp that is warming up. */
+export function Flicker({ size = 44, label }: { size?: number; label?: string }) {
+  return (
+    <span className="flicker" role={label ? 'status' : undefined} aria-label={label}>
+      <Mark size={size} />
+    </span>
+  )
+}
+
 export function PageLoader() {
   return (
-    <div className="page-loader" role="status" aria-label="Lädt">
-      <span className="lamp-pulse" />
+    <div className="page-loader">
+      <Flicker label="Lädt" />
     </div>
   )
 }

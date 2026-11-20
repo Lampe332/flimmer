@@ -1,14 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router'
-import Icon from './Icon'
+import Icon, { type IconName } from './Icon'
 import Logo from './Logo'
 
-const NAV = [
-  { to: '/', label: 'Start', end: true },
-  { to: '/filme', label: 'Filme', end: false },
-  { to: '/serien', label: 'Serien', end: false },
-  { to: '/merkliste', label: 'Merkliste', end: false },
+const NAV: { to: string; label: string; end: boolean; icon: IconName }[] = [
+  { to: '/', label: 'Start', end: true, icon: 'home' },
+  { to: '/filme', label: 'Filme', end: false, icon: 'film' },
+  { to: '/serien', label: 'Serien', end: false, icon: 'tv' },
+  { to: '/merkliste', label: 'Merkliste', end: false, icon: 'bookmark' },
 ]
+
+/** True once the page has scrolled past the top, so the bar can turn solid over content. */
+function useScrolled(): boolean {
+  const [scrolled, setScrolled] = useState(false)
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+  return scrolled
+}
 
 export default function Header() {
   const navigate = useNavigate()
@@ -19,6 +31,7 @@ export default function Header() {
   const [value, setValue] = useState(urlQ)
   const input = useRef<HTMLInputElement>(null)
   const typed = useRef(false)
+  const scrolled = useScrolled()
 
   // Keep field in sync when the URL changes (back/forward, leaving search).
   useEffect(() => {
@@ -53,45 +66,57 @@ export default function Header() {
   }, [])
 
   return (
-    <header className="header">
-      <div className="header-inner">
-        <Logo />
-        <nav className="nav" aria-label="Hauptnavigation">
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
-        <form
-          className="search"
-          role="search"
-          onSubmit={(e) => {
-            e.preventDefault()
-            typed.current = false
-            const q = value.trim()
-            if (q) navigate(`/suche?q=${encodeURIComponent(q)}`, { replace: onSearch })
-          }}
-        >
-          <Icon name="search" size={18} />
-          <input
-            ref={input}
-            type="search"
-            value={value}
-            onChange={(e) => {
-              typed.current = true
-              setValue(e.target.value)
+    <>
+      <header className={`header${scrolled ? ' is-solid' : ''}`}>
+        <div className="header-inner">
+          <Logo />
+          <nav className="nav" aria-label="Hauptnavigation">
+            {NAV.map((n) => (
+              <NavLink key={n.to} to={n.to} end={n.end} className="nav-link">
+                {n.label}
+              </NavLink>
+            ))}
+          </nav>
+          <form
+            className="search"
+            role="search"
+            onSubmit={(e) => {
+              e.preventDefault()
+              typed.current = false
+              const q = value.trim()
+              if (q) navigate(`/suche?q=${encodeURIComponent(q)}`, { replace: onSearch })
             }}
-            placeholder="Filme und Serien suchen"
-            aria-label="Filme und Serien suchen"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <kbd className="search-kbd" aria-hidden="true">
-            /
-          </kbd>
-        </form>
-      </div>
-    </header>
+          >
+            <Icon name="search" size={18} />
+            <input
+              ref={input}
+              type="search"
+              value={value}
+              onChange={(e) => {
+                typed.current = true
+                setValue(e.target.value)
+              }}
+              placeholder="Filme und Serien suchen"
+              aria-label="Filme und Serien suchen"
+              autoComplete="off"
+              spellCheck={false}
+              enterKeyHint="search"
+            />
+            <kbd className="search-kbd" aria-hidden="true">
+              /
+            </kbd>
+          </form>
+        </div>
+      </header>
+
+      <nav className="tabbar" aria-label="Hauptnavigation">
+        {NAV.map((n) => (
+          <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link">
+            <Icon name={n.icon} size={22} />
+            <span>{n.label}</span>
+          </NavLink>
+        ))}
+      </nav>
+    </>
   )
 }

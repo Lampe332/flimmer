@@ -1,13 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
+import Icon from '../components/Icon'
 import Hero, { HeroSkeleton } from '../components/Hero'
-import PosterCard from '../components/PosterCard'
+import PosterCard, { WideCard, WideSkeletons } from '../components/PosterCard'
 import Row from '../components/Row'
 import { CardSkeletons, ErrorState } from '../components/States'
 import { api, type Home as HomeData, type Item } from '../lib/api'
 
 const ROWS: { key: keyof HomeData; title: string; more?: string }[] = [
-  { key: 'trending', title: 'Trending' },
+  { key: 'trending', title: 'Heute angesagt' },
   { key: 'popular_movies', title: 'Beliebte Filme', more: '/filme' },
   { key: 'popular_tv', title: 'Beliebte Serien', more: '/serien' },
   { key: 'top_rated_movies', title: 'Top bewertete Filme', more: '/filme?liste=top_rated' },
@@ -31,14 +32,21 @@ export default function Home() {
               r.more ? (
                 <Link to={r.more} className="row-more">
                   Alle anzeigen
+                  <Icon name="right" size={14} />
                 </Link>
               ) : undefined
             }
           >
-            {isPending ? (
+            {r.key === 'trending' ? (
+              isPending ? (
+                <WideSkeletons />
+              ) : (
+                data.trending.filter((item) => item.backdrop).map((item) => <WideCard key={`${item.type}-${item.id}`} item={item} />)
+              )
+            ) : isPending ? (
               <CardSkeletons count={8} />
             ) : (
-              data[r.key].map((item: Item) => <PosterCard key={`${item.type}-${item.id}`} item={item} showType={r.key === 'trending'} />)
+              data[r.key].map((item: Item) => <PosterCard key={`${item.type}-${item.id}`} item={item} />)
             )}
           </Row>
         ))}

@@ -1,5 +1,4 @@
-const SOURCE_KEY = 'flimmer.lastSource'
-const SANDBOX_KEY = 'flimmer.popupGuard'
+const VOLUME_KEY = 'flimmer.volume'
 
 function read(key: string): string | null {
   try {
@@ -17,32 +16,23 @@ function write(key: string, value: string): void {
   }
 }
 
-export function getLastSource(): string | null {
-  return read(SOURCE_KEY)
-}
+export type VolumePref = { volume: number; muted: boolean }
 
-export function setLastSource(id: string): void {
-  write(SOURCE_KEY, id)
-}
-
-function readGuardMap(): Record<string, boolean> {
-  const raw = read(SANDBOX_KEY)
-  if (!raw) return {}
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, boolean>) : {}
-  } catch {
-    return {}
+export function getVolume(): VolumePref {
+  const raw = read(VOLUME_KEY)
+  if (raw) {
+    try {
+      const v = JSON.parse(raw) as Partial<VolumePref>
+      if (typeof v.volume === 'number' && v.volume >= 0 && v.volume <= 1) {
+        return { volume: v.volume, muted: v.muted === true }
+      }
+    } catch {
+      /* fall through to the default */
+    }
   }
+  return { volume: 1, muted: false }
 }
 
-/** Popup guard (iframe sandbox) per source id, default on. */
-export function getPopupGuard(sourceId: string): boolean {
-  return readGuardMap()[sourceId] ?? true
-}
-
-export function setPopupGuard(sourceId: string, on: boolean): void {
-  const map = readGuardMap()
-  map[sourceId] = on
-  write(SANDBOX_KEY, JSON.stringify(map))
+export function setVolume(pref: VolumePref): void {
+  write(VOLUME_KEY, JSON.stringify(pref))
 }

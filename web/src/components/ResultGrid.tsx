@@ -52,7 +52,7 @@ export default function ResultGrid({ items, loading, hasMore, loadingMore, onMor
       </div>
       {hasMore && !loading && (
         <div className="grid-more" ref={sentinel}>
-          <button type="button" className="btn btn-ghost" onClick={onMore} disabled={loadingMore}>
+          <button type="button" className="btn btn-glass" onClick={onMore} disabled={loadingMore}>
             {loadingMore ? 'Lädt …' : 'Mehr laden'}
           </button>
         </div>

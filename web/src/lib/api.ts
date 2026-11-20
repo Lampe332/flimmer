@@ -52,11 +52,67 @@ export interface SeasonDetails {
   episodes: Episode[]
 }
 
-export interface Source {
-  id: string
+export interface Caps {
+  sniffer: boolean
+}
+
+export interface Variant {
+  width: number | null
+  height: number | null
+  bandwidth: number | null
+  codecs: string | null
+}
+
+export interface Track {
+  lang: string | null
+  name: string | null
+}
+
+export type ScanStatus = 'pending' | 'running' | 'ok' | 'no_stream' | 'error'
+
+export interface ScanResult {
+  provider_id: string
   name: string
-  no_ads: boolean
-  url: string
+  status: ScanStatus
+  ms: number | null
+  max_width: number | null
+  max_height: number | null
+  max_bandwidth: number | null
+  variants: Variant[]
+  audio: Track[]
+  subtitles: Track[]
+  stream_id: string | null
+  error: string | null
+}
+
+export interface Scan {
+  state: 'idle' | 'running' | 'done' | 'unavailable'
+  started_at: string | null
+  finished_at: string | null
+  results: ScanResult[]
+}
+
+export type MinHeight = 0 | 480 | 720 | 1080 | 2160
+export type AudioLang = 'any' | 'de' | 'en'
+export type SortKey = 'quality' | 'bitrate' | 'speed'
+
+export interface Filter {
+  min_height: MinHeight
+  audio_lang: AudioLang
+  sort: SortKey
+}
+
+export interface Settings {
+  filter: Filter
+  prefetch_minutes: number
+}
+
+export interface BufferState {
+  variant: number
+  from_seconds: number
+  ahead_seconds: number
+  bytes: number
+  done: boolean
 }
 
 export interface Page {
@@ -122,10 +178,33 @@ export const api = {
     request<Page>(`/search?${new URLSearchParams({ q, page: String(page) })}`),
   title: (type: MediaType, id: number) => request<Details>(`/title/${type}/${id}`),
   season: (id: number, n: number) => request<SeasonDetails>(`/title/tv/${id}/season/${n}`),
-  sources: (type: MediaType, id: number, s?: number, e?: number) => {
-    const qs = type === 'tv' ? `?s=${s ?? 1}&e=${e ?? 1}` : ''
-    return request<Source[]>(`/sources/${type}/${id}${qs}`)
+  caps: () => request<Caps>('/caps'),
+  scan: (type: MediaType, id: number, s: number, e: number) =>
+    request<Scan>(`/scan/${type}/${id}${episodeQuery(type, s, e)}`),
+  /** Starts a scan (or returns the running / still fresh one). `provider` re-scans a single provider. */
+  scanStart: (type: MediaType, id: number, s: number, e: number, opts: { force?: boolean; provider?: string } = {}) => {
+    const params = new URLSearchParams(episodeQuery(type, s, e))
+    if (opts.force) params.set('force', '1')
+    if (opts.force && opts.provider) params.set('provider', opts.provider)
+    const qs = params.toString()
+    return request<Scan>(`/scan/${type}/${id}${qs ? `?${qs}` : ''}`, { method: 'POST' })
   },
+  settings: () => request<Settings>('/settings'),
+  settingsPut: (settings: Settings) =>
+    request<void>('/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    }),
+  prefetch: (streamId: string, variant: number, from: number) =>
+    request<void>(
+      `/stream/${encodeURIComponent(streamId)}/prefetch?variant=${variant}&from=${Math.max(0, Math.floor(from))}`,
+      { method: 'POST' },
+    ),
+  buffer: (streamId: string) => request<BufferState>(`/stream/${encodeURIComponent(streamId)}/buffer`),
+  /** Stops the prefetch of a stream and frees its cache; the stream itself stays playable. */
+  streamRelease: (streamId: string) =>
+    request<void>(`/stream/${encodeURIComponent(streamId)}`, { method: 'DELETE', keepalive: true }),
   watchlist: () => request<Item[]>('/watchlist'),
   watchlistAdd: (item: Item) =>
     request<void>(`/watchlist/${item.type}/${item.id}`, {
@@ -135,6 +214,14 @@ export const api = {
     }),
   watchlistRemove: (type: MediaType, id: number) =>
     request<void>(`/watchlist/${type}/${id}`, { method: 'DELETE' }),
+}
+
+function episodeQuery(type: MediaType, s: number, e: number): string {
+  return type === 'tv' ? `?s=${s}&e=${e}` : ''
+}
+
+export function streamUrl(streamId: string): string {
+  return `/api/stream/${encodeURIComponent(streamId)}/master.m3u8`
 }
 
 /** Strip Details down to the plain Item shape the watchlist stores. */

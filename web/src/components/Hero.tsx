@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import { playPath, titlePath, type Item } from '../lib/api'
 import { formatRating, typeLabel } from '../lib/format'
 import Icon from './Icon'
@@ -13,7 +13,6 @@ export default function Hero({ items }: { items: Item[] }) {
   const [index, setIndex] = useState(0)
   const [paused, setPaused] = useState(prefersReducedMotion)
   const [hold, setHold] = useState(false)
-  const navigate = useNavigate()
 
   const current = slides[index]
   if (!current) return null
@@ -48,38 +47,34 @@ export default function Hero({ items }: { items: Item[] }) {
       </div>
 
       <div className="hero-body" key={`${current.type}-${current.id}`} aria-live={running ? 'off' : 'polite'}>
-        <p className="hero-meta">
-          <span>{typeLabel(current.type)}</span>
-          {current.year && <span>{current.year}</span>}
+        <ul className="meta">
+          <li className="meta-tag">{typeLabel(current.type)}</li>
+          {current.year && <li>{current.year}</li>}
           {rating && (
-            <span className="hero-rating">
+            <li className="meta-rating">
               <Icon name="star" size={14} />
               {rating}
-            </span>
+            </li>
           )}
-        </p>
+        </ul>
         <h1 className="hero-title">
           <Link to={titlePath(current)}>{current.title}</Link>
         </h1>
         {current.overview && <p className="hero-overview">{current.overview}</p>}
-        <div className="hero-actions">
-          <button type="button" className="btn btn-primary btn-lg" onClick={() => navigate(playPath(current.type, current.id))}>
+        <div className="actions">
+          <Link to={playPath(current.type, current.id)} className="btn btn-primary btn-lg">
             <Icon name="play" size={18} />
             Abspielen
-          </button>
-          <SaveButton item={current} />
+          </Link>
+          <Link to={titlePath(current)} className="btn btn-glass btn-lg">
+            <Icon name="info" size={18} />
+            Details
+          </Link>
+          <SaveButton item={current} variant="round" />
         </div>
       </div>
 
       <div className="hero-strip">
-        <button
-          type="button"
-          className="icon-btn hero-pause"
-          onClick={() => setPaused((p) => !p)}
-          aria-label={paused ? 'Automatischen Wechsel starten' : 'Automatischen Wechsel anhalten'}
-        >
-          <Icon name={paused ? 'play' : 'pause'} size={16} />
-        </button>
         <ol className="hero-picks">
           {slides.map((s, i) => (
             <li key={`${s.type}-${s.id}`}>
@@ -90,6 +85,9 @@ export default function Hero({ items }: { items: Item[] }) {
                 aria-current={i === index}
                 aria-label={`${s.title} zeigen`}
               >
+                <span className="hero-pick-thumb">
+                  <img src={s.backdrop ?? undefined} alt="" loading="lazy" decoding="async" />
+                </span>
                 <span className="hero-pick-title">{s.title}</span>
                 <span className="hero-pick-bar">
                   {i === index && (
@@ -104,6 +102,14 @@ export default function Hero({ items }: { items: Item[] }) {
             </li>
           ))}
         </ol>
+        <button
+          type="button"
+          className="icon-btn hero-pause"
+          onClick={() => setPaused((p) => !p)}
+          aria-label={paused ? 'Automatischen Wechsel starten' : 'Automatischen Wechsel anhalten'}
+        >
+          <Icon name={paused ? 'play' : 'pause'} size={14} />
+        </button>
       </div>
     </section>
   )

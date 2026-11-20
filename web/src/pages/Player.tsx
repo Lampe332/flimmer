@@ -1,18 +1,34 @@
-import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import EpisodeList from '../components/EpisodeList'
 import Icon from '../components/Icon'
+import ScanPanel from '../components/player/ScanPanel'
+import VideoPlayer from '../components/player/VideoPlayer'
 import SeasonTabs from '../components/SeasonTabs'
-import { ErrorState } from '../components/States'
-import { api, isMediaType, playPath, titlePath, type Season } from '../lib/api'
-import { formatDate } from '../lib/format'
-import { getLastSource, getPopupGuard, setLastSource, setPopupGuard } from '../lib/storage'
+import { ErrorState, Flicker } from '../components/States'
+import {
+  api,
+  ApiError,
+  playPath,
+  titlePath,
+  isMediaType,
+  type MediaType,
+  type Scan,
+  type ScanResult,
+  type Season,
+  type Settings,
+} from '../lib/api'
+import { formatDate, formatHeight } from '../lib/format'
+import { rank } from '../lib/pick'
+import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
-const SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-presentation'
-
 type Ep = { s: number; e: number }
+
+/** Server defaults, used until the saved settings have loaded. */
+const DEFAULTS: Settings = { filter: { min_height: 0, audio_lang: 'any', sort: 'quality' }, prefetch_minutes: 10 }
+const NO_SCAN: Scan = { state: 'unavailable', started_at: null, finished_at: null, results: [] }
 
 function neighbour(seasons: Season[], cur: Ep, dir: 1 | -1): Ep | null {
   const idx = seasons.findIndex((x) => x.season_number === cur.s)
@@ -30,186 +46,282 @@ function neighbour(seasons: Season[], cur: Ep, dir: 1 | -1): Ep | null {
 
 export default function Player() {
   const { type, id: idRaw } = useParams()
-  const id = Number(idRaw)
-  const valid = isMediaType(type) && Number.isInteger(id) && id > 0
-  const mediaType = type === 'tv' ? 'tv' : 'movie'
   const [params] = useSearchParams()
+  const id = Number(idRaw)
+  if (!isMediaType(type) || !Number.isInteger(id) || id <= 0) return <NotFound />
+  const s = Math.max(0, Math.floor(Number(params.get('s'))) || 1)
+  const e = Math.max(1, Math.floor(Number(params.get('e'))) || 1)
+  return <PlayerView key={`${type}-${id}-${s}-${e}`} type={type} id={id} s={s} e={e} />
+}
+
+function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number; e: number }) {
+  const qc = useQueryClient()
   const navigate = useNavigate()
-  const s = Math.max(0, Number(params.get('s')) || 1)
-  const e = Math.max(1, Number(params.get('e')) || 1)
-  const isTv = mediaType === 'tv'
+  const isTv = type === 'tv'
 
-  const [chosen, setChosen] = useState<string | null>(getLastSource)
-  const [, setGuardVersion] = useState(0)
+  const [manual, setManual] = useState<string | null>(null)
+  const [locked, setLocked] = useState<string | null>(null)
+  const [dead, setDead] = useState<ReadonlySet<string>>(new Set())
+  const [draft, setDraft] = useState<Settings | null>(null)
   const [viewSeason, setViewSeason] = useState(s)
-  useEffect(() => setViewSeason(s), [s])
+  const resume = useRef(0)
+  const retried = useRef(new Set<string>())
 
-  const details = useQuery({
-    queryKey: ['title', mediaType, id],
-    queryFn: () => api.title(mediaType, id),
-    enabled: valid,
-  })
-  const sources = useQuery({
-    queryKey: ['sources', mediaType, id, isTv ? s : 0, isTv ? e : 0],
-    queryFn: () => api.sources(mediaType, id, s, e),
-    enabled: valid,
-  })
-  const season = useQuery({
-    queryKey: ['season', id, s],
-    queryFn: () => api.season(id, s),
-    enabled: valid && isTv,
+  const details = useQuery({ queryKey: ['title', type, id], queryFn: () => api.title(type, id) })
+  const season = useQuery({ queryKey: ['season', id, s], queryFn: () => api.season(id, s), enabled: isTv })
+  const caps = useQuery({ queryKey: ['caps'], queryFn: api.caps, staleTime: 60_000, retry: false })
+  const saved = useQuery({ queryKey: ['settings'], queryFn: api.settings, staleTime: Infinity, retry: false })
+  const sniffer = caps.data?.sniffer === true
+  const settings = draft ?? saved.data ?? DEFAULTS
+
+  const save = useMutation({
+    mutationFn: api.settingsPut,
+    onSuccess: (_void, next) => qc.setQueryData(['settings'], next),
   })
 
-  if (!valid) return <NotFound />
+  // ---- scan: start it (app only), then poll while it runs ----
+  const scanKey = useMemo(() => ['scan', type, id, s, e] as const, [type, id, s, e])
+  const start = useMutation({
+    mutationFn: (opts: { force?: boolean; provider?: string }) => api.scanStart(type, id, s, e, opts),
+    onMutate: () => qc.cancelQueries({ queryKey: scanKey }),
+    onSuccess: async (data) => {
+      await qc.cancelQueries({ queryKey: scanKey })
+      qc.setQueryData(scanKey, data)
+    },
+  })
+  const startScan = start.mutate
+  useEffect(() => {
+    if (sniffer) startScan({})
+  }, [sniffer, startScan])
 
-  const list = sources.data ?? []
-  const source = list.find((x) => x.id === chosen) ?? list[0]
-  const guard = source ? getPopupGuard(source.id) : true
+  const scanQ = useQuery({
+    queryKey: scanKey,
+    queryFn: () => api.scan(type, id, s, e),
+    enabled: caps.isFetched && (!sniffer || start.isSuccess || start.isError),
+    refetchInterval: (q) => (q.state.data?.state === 'running' ? 1000 : false),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
+  })
+  // A server without the scan API (older build) behaves like one without a sniffer.
+  const scanMissing = scanQ.error instanceof ApiError && scanQ.error.status === 404
+  const scan: Scan | undefined = scanQ.data ?? (scanMissing ? NO_SCAN : undefined)
+  const scanError = scanQ.error && !scanMissing ? scanQ.error : start.error
+
+  const results: ScanResult[] = useMemo(
+    () =>
+      (scan?.results ?? []).map((r) =>
+        dead.has(r.provider_id) ? { ...r, status: 'error', error: 'Stream abgelaufen', stream_id: null } : r,
+      ),
+    [scan, dead],
+  )
+  const shownScan = scan ? { ...scan, results } : undefined
+  const ranked = useMemo(() => rank(results, settings.filter), [results, settings.filter])
+  const running = scan?.state === 'running' || start.isPending
+  const settled = !!scan && !running
+  const best = ranked[0]
+  const chosen = manual ?? locked
+  const active = chosen ? results.find((r) => r.provider_id === chosen && r.status === 'ok' && r.stream_id) : undefined
+
+  // Automatic choice: once every provider has answered, take the best match and stay on it.
+  useEffect(() => {
+    if (!settled) return
+    if (chosen && !active) {
+      setManual(null)
+      setLocked(null)
+    } else if (!chosen && best) {
+      setLocked(best.provider_id)
+    }
+  }, [settled, chosen, active, best])
+
+  const onSettings = (next: Settings) => {
+    setDraft(next)
+    save.mutate(next)
+    if (!manual) setLocked(null)
+  }
+
+  const onExpired = () => {
+    const provider = active?.provider_id
+    if (!provider) return
+    setManual(null)
+    setLocked(null)
+    if (sniffer && !retried.current.has(provider)) {
+      retried.current.add(provider)
+      startScan({ force: true, provider })
+    } else {
+      setDead((old) => new Set(old).add(provider))
+    }
+  }
 
   const d = details.data
+  useTitle(d?.title)
   const episode = season.data?.episodes.find((x) => x.episode_number === e)
   const seasons = d?.seasons ?? []
   const next = isTv ? neighbour(seasons, { s, e }, 1) : null
   const prev = isTv ? neighbour(seasons, { s, e }, -1) : null
   const go = (to: Ep) => navigate(playPath('tv', id, to.s, to.e), { replace: true })
-
-  const pick = (sid: string) => {
-    setChosen(sid)
-    setLastSource(sid)
-  }
-  const toggleGuard = () => {
-    if (!source) return
-    setPopupGuard(source.id, !guard)
-    setGuardVersion((v) => v + 1)
-  }
+  const epLabel = isTv ? `Staffel ${s}, Folge ${e}` : undefined
+  const checked = results.filter((r) => r.status !== 'pending' && r.status !== 'running').length
 
   return (
     <div className="player-page">
       <div className="player-top">
-        <Link to={titlePath({ type: mediaType, id })} className="back-link">
+        <Link to={titlePath({ type, id })} className="back-link" aria-label={d ? `Zurück zu ${d.title}` : 'Zurück zum Titel'}>
           <Icon name="left" size={18} />
-          <span className="back-text">{d ? d.title : 'Zurück zum Titel'}</span>
         </Link>
-        {isTv && (
-          <span className="player-ep-label">
-            Staffel {s}, Folge {e}
-          </span>
-        )}
-      </div>
-
-      <div className="stage">
-        {sources.error ? (
-          <ErrorState error={sources.error} onRetry={() => void sources.refetch()} />
-        ) : !source ? (
-          <div className="frame frame-empty">
-            {sources.isPending ? <span className="lamp-pulse" role="status" aria-label="Quellen laden" /> : <p>Für diesen Titel sind keine Quellen eingetragen.</p>}
-          </div>
-        ) : (
-          <div className="frame">
-            <iframe
-              key={`${source.url}|${guard ? 'guard' : 'open'}`}
-              src={source.url}
-              title={`${d?.title ?? 'Video'} über ${source.name}`}
-              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-              allowFullScreen
-              referrerPolicy="origin"
-              sandbox={guard ? SANDBOX : undefined}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="controls">
-        {isTv && (
-          <div className="ep-nav">
-            <button type="button" className="btn btn-ghost" disabled={!prev} onClick={() => prev && go(prev)}>
-              <Icon name="left" size={18} />
-              Vorherige Folge
-            </button>
-            <button type="button" className="btn btn-primary" disabled={!next} onClick={() => next && go(next)}>
-              Nächste Folge
-              <Icon name="right" size={18} />
-            </button>
-          </div>
-        )}
-        {source && (
-          <div className="guard">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={guard}
-              className="switch"
-              onClick={toggleGuard}
-              aria-describedby="guard-hint"
-            >
-              <span className="switch-track" aria-hidden="true">
-                <span className="switch-thumb" />
-              </span>
-              <Icon name="shield" size={16} />
-              Popup-Schutz
-            </button>
-            <p id="guard-hint" className="guard-hint">
-              {guard
-                ? 'Blockiert Werbefenster. Lädt der Player nicht, schalte ihn für diese Quelle aus.'
-                : `Aus für ${source.name}. Werbefenster können sich öffnen.`}
+        <div className="player-heading">
+          <h1 className="player-title">{d ? d.title : 'Flimmer'}</h1>
+          {isTv && (
+            <p className="player-ep">
+              {epLabel}
+              {episode?.name && <span className="player-ep-name">{episode.name}</span>}
             </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <section className="sources" aria-label="Quelle wählen">
-        <h2 className="sources-title">Quelle</h2>
-        <div className="source-list">
-          {sources.isPending
-            ? Array.from({ length: 8 }, (_, i) => <span key={i} className="chip skel chip-skel" aria-hidden="true" />)
-            : list.map((x) => (
-                <button
-                  key={x.id}
-                  type="button"
-                  className={`chip source-chip${x.no_ads ? ' is-clean' : ''}`}
-                  aria-pressed={x.id === source?.id}
-                  onClick={() => pick(x.id)}
-                  title={x.no_ads ? `${x.name}, laut Liste ohne Werbung` : x.name}
-                >
-                  {x.no_ads && <span className="clean-dot" aria-hidden="true" />}
-                  {x.name}
-                  {x.no_ads && <span className="sr-only">, ohne Werbung</span>}
-                </button>
-              ))}
-        </div>
-        {list.some((x) => x.no_ads) && (
-          <p className="page-note">
-            <span className="clean-dot" aria-hidden="true" /> laut Anbieterliste ohne Werbung
-          </p>
-        )}
-      </section>
+      <div className="player-layout">
+        <div className="player-main">
+          {caps.isFetched && !sniffer && active && (
+            <p className="app-note">
+              <Icon name="app" size={18} />
+              <span>
+                <strong>Quellen-Prüfung nur in der Flimmer-App.</strong> Im Browser spielt Flimmer bereits geprüfte Quellen ab,
+                neue findet nur die App.
+              </span>
+            </p>
+          )}
 
-      <section className="now-info">
-        {details.error ? null : d ? (
-          <>
-            <h1 className="now-title">{d.title}</h1>
-            {isTv && (
-              <h2 className="now-ep">
-                {episode ? `${e}. ${episode.name}` : `Folge ${e}`}
-                {episode?.air_date && <span className="now-date">{formatDate(episode.air_date)}</span>}
-              </h2>
+          <div className={`stage${active ? ' has-video' : ''}`}>
+            {active?.stream_id ? (
+              <VideoPlayer
+                key={active.stream_id}
+                streamId={active.stream_id}
+                variants={active.variants}
+                title={d?.title ?? ''}
+                subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
+                startAt={resume.current}
+                onTime={(t) => (resume.current = t)}
+                onExpired={onExpired}
+                next={next ? { label: `Staffel ${next.s}, Folge ${next.e}`, go: () => go(next) } : undefined}
+              />
+            ) : (
+              <>
+                {d?.backdrop && <img className="stage-backdrop" src={d.backdrop} alt="" />}
+                <div className="stage-card" role="status">
+                  {scanError ? (
+                    <ErrorState error={scanError} onRetry={() => (sniffer ? startScan({}) : void scanQ.refetch())} />
+                  ) : !scan || !caps.isFetched ? (
+                    <Flicker size={52} label="Quellen werden geladen" />
+                  ) : running ? (
+                    <>
+                      <Flicker size={52} />
+                      <h2>Quellen werden geprüft</h2>
+                      <p>
+                        {results.length > 0
+                          ? `${checked} von ${results.length} Anbietern haben geantwortet. Flimmer startet mit der besten Quelle, sobald alle durch sind.`
+                          : 'Flimmer fragt die Anbieter nach einem Stream für diesen Titel.'}
+                      </p>
+                      {best && (
+                        <button type="button" className="btn btn-primary" onClick={() => setLocked(best.provider_id)}>
+                          <Icon name="play" size={16} />
+                          Jetzt mit {best.name} starten
+                          {formatHeight(best.max_height) && <span className="btn-note">{formatHeight(best.max_height)}</span>}
+                        </button>
+                      )}
+                    </>
+                  ) : !sniffer ? (
+                    <>
+                      <span className="state-icon">
+                        <Icon name="app" size={26} />
+                      </span>
+                      <h2>Quellen-Prüfung nur in der Flimmer-App</h2>
+                      <p>
+                        Im Browser kann Flimmer keine Streams aufspüren. Öffne diesen Titel in der Flimmer-App, dort werden
+                        alle Quellen geprüft und die beste startet von selbst. Was die App schon gefunden hat, läuft danach
+                        auch hier.
+                      </p>
+                      <Link to={titlePath({ type, id })} className="btn btn-glass">
+                        <Icon name="left" size={16} />
+                        Zurück zum Titel
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      <span className="state-icon is-warn">
+                        <Icon name="warn" size={26} />
+                      </span>
+                      <h2>Keine Quelle spielbar</h2>
+                      <p>
+                        {results.length > 0
+                          ? 'Kein Anbieter hat gerade einen Stream für diesen Titel geliefert. Das ändert sich oft nach ein paar Minuten.'
+                          : 'Für diesen Titel sind keine Anbieter eingetragen.'}
+                      </p>
+                      <button type="button" className="btn btn-primary" onClick={() => startScan({ force: true })}>
+                        <Icon name="refresh" size={16} />
+                        Neu prüfen
+                      </button>
+                    </>
+                  )}
+                </div>
+              </>
             )}
-            <p className="now-overview">{(isTv && episode?.overview) || d.overview}</p>
-          </>
-        ) : (
-          <>
-            <div className="skel skel-title" />
-            <div className="skel skel-line" />
-          </>
-        )}
-      </section>
+          </div>
+
+          {isTv && (
+            <div className="ep-nav">
+              <button type="button" className="btn btn-glass" disabled={!prev} onClick={() => prev && go(prev)}>
+                <Icon name="left" size={16} />
+                Vorherige Folge
+              </button>
+              <button type="button" className="btn btn-glass" disabled={!next} onClick={() => next && go(next)}>
+                Nächste Folge
+                <Icon name="right" size={16} />
+              </button>
+            </div>
+          )}
+
+          <section className="now-info">
+            {details.error ? null : d ? (
+              <>
+                {isTv && (
+                  <h2 className="now-ep">
+                    {episode ? `${e}. ${episode.name}` : `Folge ${e}`}
+                    {episode?.air_date && <span className="now-date">{formatDate(episode.air_date)}</span>}
+                  </h2>
+                )}
+                <p className="now-overview">{(isTv && episode?.overview) || d.overview}</p>
+              </>
+            ) : (
+              <>
+                <div className="skel skel-title" />
+                <div className="skel skel-line" />
+              </>
+            )}
+          </section>
+        </div>
+
+        <ScanPanel
+          sniffer={sniffer}
+          scan={shownScan}
+          loading={!scan && !scanError}
+          settings={settings}
+          saveFailed={save.isError}
+          onSettings={onSettings}
+          active={active?.provider_id ?? null}
+          manual={manual !== null}
+          onPick={setManual}
+          onAuto={() => (setManual(null), setLocked(null))}
+          onRescan={() => (setManual(null), setLocked(null), startScan({ force: true }))}
+        />
+      </div>
 
       {isTv && seasons.length > 0 && (
         <section className="detail-section" aria-label="Folge wählen">
           <div className="section-head">
             <h2 className="row-title">Folgen</h2>
+            <SeasonTabs seasons={seasons} value={viewSeason} onChange={setViewSeason} />
           </div>
-          <SeasonTabs seasons={seasons} value={viewSeason} onChange={setViewSeason} />
           <EpisodeList tvId={id} season={viewSeason} current={viewSeason === s ? e : undefined} compact />
         </section>
       )}

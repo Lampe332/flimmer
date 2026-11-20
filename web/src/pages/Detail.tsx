@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import EpisodeList from '../components/EpisodeList'
 import Icon from '../components/Icon'
 import PosterCard from '../components/PosterCard'
@@ -10,6 +10,7 @@ import SeasonTabs from '../components/SeasonTabs'
 import { ErrorState, PageLoader } from '../components/States'
 import { api, isMediaType, playPath } from '../lib/api'
 import { formatRating, formatRuntime, typeLabel } from '../lib/format'
+import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
 const TrailerModal = lazy(() => import('../components/TrailerModal'))
@@ -20,13 +21,14 @@ export default function Detail() {
   const valid = isMediaType(type) && Number.isInteger(id) && id > 0
   const [params, setParams] = useSearchParams()
   const [trailer, setTrailer] = useState(false)
-  const navigate = useNavigate()
 
   const q = useQuery({
     queryKey: ['title', type, id],
     queryFn: () => api.title(type as 'movie' | 'tv', id),
     enabled: valid,
   })
+
+  useTitle(q.data?.title)
 
   if (!valid) return <NotFound />
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -38,8 +40,8 @@ export default function Detail() {
   const firstSeason = d.seasons[0]?.season_number
   const seasonParam = Number(params.get('staffel'))
   const season = d.seasons.some((s) => s.season_number === seasonParam) ? seasonParam : firstSeason
-
-  const play = () => navigate(playPath(d.type, d.id, firstSeason ?? 1, 1))
+  const browse = d.type === 'movie' ? '/filme' : '/serien'
+  const seasonCount = d.seasons.length
 
   return (
     <article className="detail">
@@ -59,41 +61,50 @@ export default function Detail() {
           )}
         </div>
         <div className="detail-info">
-          <p className="hero-meta">
-            <span>{typeLabel(d.type)}</span>
-            {d.year && <span>{d.year}</span>}
-            {runtime && <span>{d.type === 'tv' ? `${runtime} pro Folge` : runtime}</span>}
+          <ul className="meta">
+            <li className="meta-tag">{typeLabel(d.type)}</li>
+            {d.year && <li>{d.year}</li>}
+            {runtime && <li>{d.type === 'tv' ? `${runtime} pro Folge` : runtime}</li>}
+            {d.type === 'tv' && seasonCount > 0 && <li>{seasonCount === 1 ? '1 Staffel' : `${seasonCount} Staffeln`}</li>}
             {rating && (
-              <span className="hero-rating">
+              <li className="meta-rating">
                 <Icon name="star" size={14} />
                 {rating}
-              </span>
+              </li>
             )}
-          </p>
+          </ul>
           <h1 className="detail-title">{d.title}</h1>
           {d.original_title && d.original_title !== d.title && <p className="detail-original">{d.original_title}</p>}
           {d.tagline && <p className="detail-tagline">{d.tagline}</p>}
-          {d.genres.length > 0 && (
-            <ul className="detail-genres" aria-label="Genres">
-              {d.genres.map((g) => (
-                <li key={g.id}>{g.name}</li>
-              ))}
-            </ul>
-          )}
-          {d.overview ? <p className="detail-overview">{d.overview}</p> : <p className="detail-overview muted">Keine Beschreibung auf Deutsch vorhanden.</p>}
-          <div className="hero-actions">
-            <button type="button" className="btn btn-primary btn-lg" onClick={play}>
+          <div className="actions">
+            <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className="btn btn-primary btn-lg">
               <Icon name="play" size={18} />
               {d.type === 'tv' ? 'Ab Folge 1 abspielen' : 'Abspielen'}
-            </button>
+            </Link>
             {d.trailer_youtube_key && (
-              <button type="button" className="btn btn-ghost" onClick={() => setTrailer(true)}>
+              <button type="button" className="btn btn-glass btn-lg" onClick={() => setTrailer(true)}>
                 <Icon name="film" size={18} />
                 Trailer
               </button>
             )}
             <SaveButton item={d} />
           </div>
+          {d.overview ? (
+            <p className="detail-overview">{d.overview}</p>
+          ) : (
+            <p className="detail-overview muted">Keine Beschreibung auf Deutsch vorhanden.</p>
+          )}
+          {d.genres.length > 0 && (
+            <ul className="detail-genres" aria-label="Genres">
+              {d.genres.map((g) => (
+                <li key={g.id}>
+                  <Link to={`${browse}?genre=${g.id}`} className="chip">
+                    {g.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
 
@@ -101,12 +112,12 @@ export default function Detail() {
         <section className="detail-section" aria-label="Episoden">
           <div className="section-head">
             <h2 className="row-title">Episoden</h2>
+            <SeasonTabs
+              seasons={d.seasons}
+              value={season}
+              onChange={(n) => setParams({ staffel: String(n) }, { replace: true })}
+            />
           </div>
-          <SeasonTabs
-            seasons={d.seasons}
-            value={season}
-            onChange={(n) => setParams({ staffel: String(n) }, { replace: true })}
-          />
           <EpisodeList tvId={d.id} season={season} />
         </section>
       )}
