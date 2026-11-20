@@ -1,0 +1,8 @@
+{
+  "productName": "flimmer-spike",
+  "version": "0.1.0",
+  "identifier": "local.flimmer.spike",
+  "build": { "frontendDist": "../player" },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

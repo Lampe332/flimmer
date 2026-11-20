@@ -3,3 +3,9 @@ data/
 target/
 node_modules/
 web/dist/
+spike/node_modules/
+spike/userdata/
+spike/dl/
+spike/extensions/
+spike/extensions-adguard/
+spike/lists/

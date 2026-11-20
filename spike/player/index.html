@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Flimmer Spike Player</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #9f9; font: 12px monospace; }
+  video { width: 100%; height: 100%; object-fit: contain; }
+  #info { position: fixed; left: 8px; top: 8px; background: #000a; padding: 4px 6px; white-space: pre; }
+</style>
+</head>
+<body>
+<video id="v" muted autoplay playsinline controls></video>
+<div id="info">init</div>
+<script src="/hls.min.js"></script>
+<script src="/dash.all.min.js"></script>
+<script>
+  // ?src=<already proxied manifest URL>&type=hls|dash
+  const params = new URLSearchParams(location.search)
+  const src = params.get('src')
+  const type = params.get('type') || 'hls'
+  const v = document.getElementById('v')
+  const st = window.__state = { src, type, errors: [], fatal: null, manifest: false, levels: [], audio: [], subs: [], fragsLoaded: 0 }
+  const err = (s, fatal) => { if (st.errors.length < 30) st.errors.push(s); if (fatal) st.fatal = s }
+  if (!src) { st.fatal = 'no src' }
+  else if (type === 'dash') {
+    try {
+      const p = window.__dash = dashjs.MediaPlayer().create()
+      const E = dashjs.MediaPlayer.events
+      p.on(E.ERROR, e => err('dash: ' + (e.error && (e.error.message || e.error.code) || JSON.stringify(e).slice(0, 120)), true))
+      p.on(E.PLAYBACK_ERROR, e => err('playback: ' + (e.error && e.error.message || e.error), true))
+      p.on(E.FRAGMENT_LOADING_COMPLETED, () => { st.fragsLoaded++ })
+      p.on(E.STREAM_INITIALIZED, () => {
+        st.manifest = true
+        try { st.levels = p.getRepresentationsByType('video').map(r => ({ w: r.width, h: r.height, bitrate: r.bandwidth, codecs: r.codecs })) } catch (e) { err('levels: ' + e.message) }
+        try { st.audio = p.getTracksFor('audio').map(a => ({ lang: a.lang })) } catch {}
+        try { st.subs = p.getTracksFor('text').map(a => ({ lang: a.lang })) } catch {}
+      })
+      p.initialize(v, src, true)
+    } catch (e) { err('dash init: ' + e.message, true) }
+  }
+  else if (!window.Hls || !Hls.isSupported()) { st.fatal = 'hls.js unsupported' }
+  else {
+    const hls = window.__hls = new Hls({ enableWorker: true })
+    hls.on(Hls.Events.MANIFEST_PARSED, (_e, d) => {
+      st.manifest = true
+      st.levels = d.levels.map(l => ({ w: l.width, h: l.height, bitrate: l.bitrate, codecs: l.attrs && l.attrs.CODECS }))
+      st.audio = (hls.audioTracks || []).map(a => ({ lang: a.lang, name: a.name }))
+      st.subs = (hls.subtitleTracks || []).map(a => ({ lang: a.lang, name: a.name }))
+      v.play().catch(e => err('play: ' + e.message))
+    })
+    hls.on(Hls.Events.FRAG_LOADED, () => { st.fragsLoaded++ })
+    hls.on(Hls.Events.ERROR, (_e, d) => err(d.type + '/' + d.details + (d.response ? ' http ' + d.response.code : ''), d.fatal))
+    hls.loadSource(src)
+    hls.attachMedia(v)
+  }
+  setInterval(() => {
+    document.getElementById('info').textContent =
+      `${type} t=${v.currentTime.toFixed(1)}s  ${v.videoWidth}x${v.videoHeight}  frags=${st.fragsLoaded}  levels=${st.levels.length}` +
+      (st.fatal ? `\nFATAL ${st.fatal}` : '') + (st.errors.length ? `\nerr ${st.errors[st.errors.length - 1]}` : '')
+  }, 500)
+</script>
+</body>
+</html>

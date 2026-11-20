@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Flimmer Spike Adblock Test</title>
+<style>
+  body { background: #111; color: #ddd; font: 13px monospace; margin: 16px; }
+  .b { color: #6f6; } .n { color: #f66; } h1 { font-size: 18px; }
+  li { list-style: none; }
+</style>
+</head>
+<body>
+<h1 id="sum">running…</h1>
+<ul id="list"></ul>
+<script>
+  // Well-known ad / tracker endpoints (same families the old d3ward test used) + 2 controls.
+  // Each is requested with fetch(no-cors). "rejected" = request never reached the network
+  // (extension/DNR block) or a network failure; the baseline run without blocker shows which.
+  const ADS = [
+    'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js',
+    'https://googleads.g.doubleclick.net/pagead/id',
+    'https://static.doubleclick.net/instream/ad_status.js',
+    'https://securepubads.g.doubleclick.net/tag/js/gpt.js',
+    'https://www.googletagservices.com/tag/js/gpt.js',
+    'https://adservice.google.com/adsid/google/ui',
+    'https://c.amazon-adsystem.com/aax2/apstag.js',
+    'https://static.ads-twitter.com/uwt.js',
+    'https://ads.pubmatic.com/AdServer/js/pwt/1/1/pwt.js',
+    'https://cdn.taboola.com/libtrc/loader.js',
+    'https://widgets.outbrain.com/outbrain.js',
+    'https://contextual.media.net/dmedianet.js',
+    'https://ib.adnxs.com/ut/v3',
+    'https://c1.popads.net/pop.js',
+    'https://a.exdynsrv.com/ad-provider.js',
+    'https://poweredby.jads.co/js/jads.js',
+    'https://a.magsrv.com/ad-provider.js',
+    'https://cdn.adsafeprotected.com/iasPET.1.js',
+  ]
+  const TRACKERS = [
+    'https://www.google-analytics.com/analytics.js',
+    'https://www.googletagmanager.com/gtag/js?id=G-TEST000000',
+    'https://static.hotjar.com/c/hotjar-1.js',
+    'https://mc.yandex.ru/metrika/tag.js',
+    'https://cdn.mouseflow.com/projects/test.js',
+    'https://script.crazyegg.com/pages/scripts/0000/0000.js',
+    'https://connect.facebook.net/en_US/fbevents.js',
+    'https://bat.bing.com/bat.js',
+    'https://analytics.tiktok.com/i18n/pixel/events.js',
+    'https://sb.scorecardresearch.com/beacon.js',
+    'https://cdn.luckyorange.com/w.js',
+    'https://stats.wp.com/e-202601.js',
+    'https://cdn.segment.com/analytics.js/v1/test/analytics.min.js',
+    'https://js-agent.newrelic.com/nr-loader-spa-current.min.js',
+  ]
+  const CONTROLS = [
+    'https://cdn.jsdelivr.net/npm/hls.js@1.5.0/package.json',
+    'https://www.wikipedia.org/static/favicon/wikipedia.ico',
+  ]
+  const res = window.__adtest = { done: false, items: [] }
+  const probe = async (url, group) => {
+    let rejected = false
+    try { await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(12000) }) }
+    catch { rejected = true }
+    res.items.push({ url, group, rejected })
+    const li = document.createElement('li')
+    li.className = rejected ? 'b' : 'n'
+    li.textContent = `${rejected ? 'REJECTED ' : 'loaded   '} [${group}] ${url}`
+    document.getElementById('list').appendChild(li)
+  }
+  const all = [...ADS.map(u => [u, 'ad']), ...TRACKERS.map(u => [u, 'tracker']), ...CONTROLS.map(u => [u, 'control'])]
+  Promise.all(all.map(([u, g]) => probe(u, g))).then(() => {
+    const cnt = g => res.items.filter(i => i.group === g && i.rejected).length
+    res.ads = cnt('ad'); res.adsTotal = ADS.length
+    res.trackers = cnt('tracker'); res.trackersTotal = TRACKERS.length
+    res.controls = cnt('control'); res.controlsTotal = CONTROLS.length
+    res.done = true
+    document.getElementById('sum').textContent =
+      `rejected in page: ads ${res.ads}/${ADS.length}, trackers ${res.trackers}/${TRACKERS.length}, controls ${res.controls}/${CONTROLS.length}`
+  })
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[package]
+name = "flimmer-spike"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = "2"
+
+[dependencies]
+tauri = "2"
+serde_json = "1"
+url = "2"
+adblock = "0.13"
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"] }
+tiny_http = "0.12"
+ureq = "3"
+
+[profile.release]
+debug = false
