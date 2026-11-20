@@ -41,7 +41,48 @@ type Props = {
 }
 
 type Option = { id: number; label: string; hint?: string }
-type MenuId = 'quality' | 'audio' | 'subs'
+type MenuId = 'quality' | 'audio' | 'subs' | 'volume'
+
+/** iOS Safari ignores video.volume (only muting works); everything Chromium-based honours it. */
+const CAN_SET_VOLUME = (() => {
+  try {
+    const probe = document.createElement('video')
+    probe.volume = 0.5
+    return probe.volume === 0.5
+  } catch {
+    return true
+  }
+})()
+const NARROW = '(max-width: 760px)'
+
+/** True while the viewport is phone-sized (same breakpoint that hides the inline volume slider). */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW)
+    const on = () => setNarrow(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return narrow
+}
+
+function VolumeRange({ value, onChange, large }: { value: number; onChange: (v: number) => void; large?: boolean }) {
+  return (
+    <input
+      type="range"
+      className={`vp-range${large ? ' vp-range-lg' : ''}`}
+      min={0}
+      max={1}
+      step={0.05}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      aria-label="Lautstärke"
+      aria-valuetext={`${Math.round(value * 100)} Prozent`}
+      style={{ '--fill': `${value * 100}%` } as CSSProperties}
+    />
+  )
+}
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const IDLE_MS = 2800
@@ -108,6 +149,7 @@ export default function VideoPlayer({
   const [scrub, setScrub] = useState<number | null>(null)
   const [prefetching, setPrefetching] = useState(false)
   const [help, setHelp] = useState(false)
+  const narrow = useNarrow()
 
   // Latest callbacks/props for the long-lived listeners below.
   const live = useRef({ onTime, onExpired, onSave, variants, startAt })
@@ -793,29 +835,60 @@ export default function VideoPlayer({
               <Icon name="next" size={22} />
             </button>
           )}
-          <div className="vp-volume">
-            <button
-              type="button"
-              className="vp-btn"
-              onClick={toggleMute}
-              aria-label={vol.muted ? 'Ton an' : 'Ton aus'}
-              aria-pressed={vol.muted}
-              aria-keyshortcuts="m"
-              title={vol.muted ? 'Ton an (M)' : 'Ton aus (M)'}
-            >
-              <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
-            </button>
-            <input
-              type="range"
-              className="vp-range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={volumeShown}
-              onChange={(e) => setVol({ volume: Number(e.target.value), muted: false })}
-              aria-label="Lautstärke"
-              style={{ '--fill': `${volumeShown * 100}%` } as CSSProperties}
-            />
+          <div className="vp-volume vp-menu">
+            {narrow ? (
+              // Small screens have no room for the inline slider: the speaker opens a volume panel.
+              <button
+                type="button"
+                className="vp-btn"
+                onClick={() => setMenu((m) => (m === 'volume' ? null : 'volume'))}
+                aria-label="Lautstärke"
+                aria-haspopup="true"
+                aria-expanded={menu === 'volume'}
+              >
+                <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="vp-btn"
+                onClick={toggleMute}
+                aria-label={vol.muted ? 'Ton an' : 'Ton aus'}
+                aria-pressed={vol.muted}
+                aria-keyshortcuts="m"
+                title={vol.muted ? 'Ton an (M)' : 'Ton aus (M)'}
+              >
+                <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
+              </button>
+            )}
+            {!narrow && <VolumeRange value={volumeShown} onChange={(v) => setVol({ volume: v, muted: false })} />}
+            {menu === 'volume' && (
+              <div className="vp-pop vp-volpop" role="group" aria-label="Lautstärke">
+                <p className="vp-pop-title">Lautstärke</p>
+                <div className="vp-volpop-row">
+                  <button
+                    type="button"
+                    className="vp-btn"
+                    onClick={toggleMute}
+                    aria-label={vol.muted ? 'Ton an' : 'Ton aus'}
+                    aria-pressed={vol.muted}
+                  >
+                    <Icon name={volumeShown === 0 ? 'mute' : 'volume'} size={22} />
+                  </button>
+                  {CAN_SET_VOLUME ? (
+                    <>
+                      <VolumeRange large value={volumeShown} onChange={(v) => setVol({ volume: v, muted: false })} />
+                      <span className="vp-volpop-val">{Math.round(volumeShown * 100)} %</span>
+                    </>
+                  ) : (
+                    <span className="vp-volpop-note">{vol.muted ? 'Stumm' : 'Ton an'}</span>
+                  )}
+                </div>
+                {!CAN_SET_VOLUME && (
+                  <p className="vp-volpop-note">Lauter und leiser geht auf diesem Gerät nur mit den Tasten am Gerät.</p>
+                )}
+              </div>
+            )}
           </div>
           <p className="vp-time">
             <span>{formatClock(shown)}</span>

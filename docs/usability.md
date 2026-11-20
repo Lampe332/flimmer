@@ -22,6 +22,7 @@ Vorher → nachher. Design unverändert, nur Bedienung, Texte und Tempo.
 - Menü zeigte optimistisch, nicht was hls.js spielt → Ton-/Untertitelmenü spiegelt `hls.audioTrack`/`subtitleTrack` (auch als `data-audio-track`/`data-subtitle-track` am Player).
 - Spurnamen englisch („Italian [Forced]“) → „Italienisch (nur Fremdsprache)“, „Englisch (mit Geräuschen)“.
 - Fehler im Video: nur „wähle rechts eine andere Quelle“ → Knopf „Andere Quelle“ (nimmt die nächstbeste) bzw. „Quellen neu suchen“.
+- Handy (≤ 760 px): Lautstärke ließ sich nicht einstellen, der Regler war versteckt, der Lautsprecher schaltete nur stumm → Tipp auf den Lautsprecher öffnet „Lautstärke“ mit großem Regler (44 px Ziel), Prozentanzeige und Stumm-Knopf, Wert wird gespeichert. iOS-Safari ignoriert `video.volume`: dort nur Stumm, mit dem Hinweis „Lauter und leiser geht nur mit den Tasten am Gerät“.
 - Auto-Next-Karte bei 390 px: Bild + Textspalte quetschten sich → kompakte Leiste über den Steuerelementen, Abbrechen als ×.
 
 ## Fortschritt beim Schließen des Fensters
