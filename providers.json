@@ -1,10 +1,10 @@
 [
-  { "id": "vidlink",    "name": "VidLink",      "no_ads": false, "movie": "https://vidlink.pro/movie/{tmdb}",                         "tv": "https://vidlink.pro/tv/{tmdb}/{s}/{e}" },
-  { "id": "cinezo",     "name": "Cinezo",       "no_ads": true,  "movie": "https://player.cinezo.live/embed/movie/{tmdb}",            "tv": "https://player.cinezo.live/embed/tv/{tmdb}/{s}/{e}" },
+  { "id": "cinezo",    "name": "Cinezo",       "no_ads": true,  "movie": "https://player.cinezo.live/embed/movie/{tmdb}",            "tv": "https://player.cinezo.live/embed/tv/{tmdb}/{s}/{e}" },
   { "id": "cinesrc",    "name": "CineSrc",      "no_ads": true,  "movie": "https://cinesrc.st/embed/movie/{tmdb}",                    "tv": "https://cinesrc.st/embed/tv/{tmdb}?s={s}&e={e}" },
   { "id": "peestream",  "name": "PeeStream",    "no_ads": true,  "movie": "https://providers.peestream.in/embed/?tmdbId={tmdb}&type=movie", "tv": "https://providers.peestream.in/embed/?tmdbId={tmdb}&type=tv&season={s}&episode={e}" },
   { "id": "moviesapi",  "name": "MoviesAPI",    "no_ads": true,  "movie": "https://moviesapi.club/movie/{tmdb}",                      "tv": "https://moviesapi.club/tv/{tmdb}-{s}-{e}" },
-  { "id": "vidsrcsh",   "name": "VidSrc Embed", "no_ads": false, "movie": "https://vidsrc.sh/embed/movie/{imdb}",                      "tv": "https://vidsrc.sh/embed/tv/{imdb}/{s}/{e}" },
+  { "id": "vidlink",    "name": "VidLink",      "no_ads": false, "movie": "https://vidlink.pro/movie/{tmdb}",                         "tv": "https://vidlink.pro/tv/{tmdb}/{s}/{e}" },
+  { "id": "vidsrcsh",  "name": "VidSrc Embed", "no_ads": false, "movie": "https://vidsrc.sh/embed/movie/{imdb}",                      "tv": "https://vidsrc.sh/embed/tv/{imdb}/{s}/{e}" },
   { "id": "videasy",    "name": "VidEasy",      "no_ads": false, "movie": "https://player.videasy.net/movie/{tmdb}",                  "tv": "https://player.videasy.net/tv/{tmdb}/{s}/{e}" },
   { "id": "111movies",  "name": "111Movies",    "no_ads": false, "movie": "https://111movies.com/movie/{tmdb}",                       "tv": "https://111movies.com/tv/{tmdb}/{s}/{e}" },
   { "id": "vidzee",     "name": "VidZee",       "no_ads": false, "movie": "https://player.vidzee.wtf/embed/movie/{tmdb}",             "tv": "https://player.vidzee.wtf/embed/tv/{tmdb}/{s}/{e}" },
