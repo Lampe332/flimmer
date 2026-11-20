@@ -39,7 +39,7 @@ use crate::{
     scan::iso,
     tracker::{self, SHIM_INTERVAL, Source, Swarm},
     tsearch::Searcher,
-    vpn::{SHIM_HOST, Vpn},
+    vpn::{Route, SHIM_HOST, Vpn},
 };
 
 const SETTINGS_KEY: &str = "torrents";
@@ -67,6 +67,15 @@ pub struct TorrentSettings {
     /// Free space a download must leave on its drive, GiB.
     #[serde(default = "default_min_free_gb")]
     pub min_free_gb: u32,
+    /// Search sources turned off (ids of `GET /api/torrents/sources`).
+    #[serde(default = "crate::tsearch::default_off")]
+    pub sources_off: Vec<String>,
+    /// Torrents may run without VPN (the user confirmed the warning). Off by default.
+    #[serde(default)]
+    pub allow_direct: bool,
+    /// Without VPN even when a VPN file is there (only with `allow_direct`).
+    #[serde(default)]
+    pub direct: bool,
 }
 
 fn default_max_active() -> u32 {
@@ -86,6 +95,9 @@ impl TorrentSettings {
             upload_kbps: 30,
             max_active: default_max_active(),
             min_free_gb: default_min_free_gb(),
+            sources_off: crate::tsearch::default_off(),
+            allow_direct: false,
+            direct: false,
         }
     }
 }
@@ -386,6 +398,7 @@ fn hash_bytes(id: &str) -> [u8; 20] {
 impl Torrents {
     pub async fn new(root: PathBuf, port: u16, settings: &TorrentSettings) -> Result<Arc<Self>, String> {
         let vpn = Vpn::new(PathBuf::from(&settings.vpn_config), port, root.join("data").join("cache")).await?;
+        vpn.set_direct(settings.allow_direct, settings.direct);
         let data = root.join("data").join("torrents");
         std::fs::create_dir_all(&data).map_err(|e| format!("cannot create {}: {e}", data.display()))?;
         let opts = SessionOptions {
@@ -953,6 +966,9 @@ pub async fn start(State(st): St, body: Bytes) -> ApiResult<(StatusCode, Json<Va
     trackers.extend(req.trackers);
     let wanted = req.files.or(req.file_index.map(|i| vec![i]));
     let tor = &st.torrents;
+    if tor.vpn.route() == Route::None {
+        return Err(ApiError::needs_vpn());
+    }
 
     let existing = tor.entries.lock().unwrap().get(&id).cloned();
     let entry = match existing {
@@ -1178,9 +1194,18 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
     if !(1..=10).contains(&s.max_active) {
         return Err(ApiError::bad_request("max_active must be between 1 and 10"));
     }
+    if s.direct && !s.allow_direct {
+        return Err(ApiError::bad_request("'direct' needs 'allow_direct'"));
+    }
+    if let Some(bad) = s.sources_off.iter().find(|id| !crate::tsearch::SOURCES.iter().any(|x| x.id == id.as_str())) {
+        return Err(ApiError::bad_request(format!("unknown search source '{bad}'")));
+    }
     let data = serde_json::to_string(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
+    // Another set of sources: cached searches would show the old one.
+    st.torrents.searcher.clear_cache();
     st.db.blob_put(Table::Settings, SETTINGS_KEY, &data)?;
     st.torrents.vpn.set_conf(PathBuf::from(&s.vpn_config));
+    st.torrents.vpn.set_direct(s.allow_direct, s.direct);
     st.torrents.session.ratelimits.set_upload_bps(upload_limit(s.upload_kbps));
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1307,6 +1332,9 @@ mod tests {
             upload_kbps: 30,
             max_active: 3,
             min_free_gb: 5,
+            sources_off: Vec::new(),
+            allow_direct: false,
+            direct: false,
         }
     }
 
@@ -1314,6 +1342,8 @@ mod tests {
     fn old_settings_and_torrents_still_load() {
         let s: TorrentSettings = serde_json::from_str(r#"{"vpn_config":"x","movies_dir":"D:\\a","series_dir":"D:\\b","upload_kbps":30}"#).unwrap();
         assert_eq!((s.max_active, s.min_free_gb), (3, 5));
+        assert_eq!(s.sources_off, crate::tsearch::default_off());
+        assert!(!s.allow_direct && !s.direct);
         let m: Meta = serde_json::from_str(
             r#"{"id":"aa","name":"n","mode":"download","media":null,"trackers":[],"folder":"","files":[],"selected":[],"wanted":null,"paused":false,"completed":false,"added_at":1}"#,
         )

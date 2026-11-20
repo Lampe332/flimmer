@@ -1,3 +1,4 @@
+import { useId, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { useI18n } from '../i18n'
@@ -13,10 +14,12 @@ import {
   torrentFit,
   useTorrents,
   vpnProblem,
+  type Torrent,
   type TorrentResult,
   type Vpn,
 } from '../lib/torrents'
 import Icon from './Icon'
+import { valueLabel } from './TorrentFilters'
 
 type RowProps = {
   r: TorrentResult
@@ -27,13 +30,17 @@ type RowProps = {
   best?: boolean
   /** Already in the download list. */
   inList?: boolean
+  /** The same torrent in the download list (its files are known then). */
+  known?: Torrent
   onPlay?: () => void
   onDownload?: () => void
 }
 
-/** One torrent: resolution, size, seeders, then small chips for language, source, HDR, codec. */
-export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload }: RowProps) {
+/** One torrent: resolution, size, seeders, then small chips for language, source, HDR, codec; details fold out. */
+export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onDownload }: RowProps) {
   const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const detailsId = useId()
   const fit = filter ? torrentFit(r, filter) : { height: true, lang: true }
   const off = !(fit.height && fit.lang)
   const rel = r.release
@@ -44,10 +51,16 @@ export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload
       <span className="trow-top">
         <span className={`fact fact-quality${fit.height ? '' : ' is-miss'}`}>{quality}</span>
         <span className="trow-num">{formatBytes(r.size)}</span>
-        <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.seedersTitle', { n: r.seeders })}>
-          <Icon name="seed" size={13} stroke={2.2} />
-          {r.seeders.toLocaleString()}
-        </span>
+        {r.seeders_unknown && r.seeders === 0 ? (
+          <span className="trow-num trow-seeds is-low" title={t('td.seedsUnknownTitle')}>
+            <Icon name="seed" size={13} stroke={2.2} />?
+          </span>
+        ) : (
+          <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.seedersTitle', { n: r.seeders })}>
+            <Icon name="seed" size={13} stroke={2.2} />
+            {r.seeders.toLocaleString()}
+          </span>
+        )}
         <span className="trow-tag">
           {active ? (
             <span className="tag tag-live">
@@ -70,7 +83,7 @@ export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload
             {c.label}
           </span>
         ))}
-        {rel.source && <span className={`chip-s${rel.source === 'CAM' ? ' is-warn' : ''}`}>{rel.source}</span>}
+        {rel.source && <span className={`chip-s${rel.cam ? ' is-warn' : ''}`}>{rel.source}</span>}
         {rel.hdr && <span className="chip-s is-hdr">{rel.hdr}</span>}
         {rel.codec && <span className="chip-s">{rel.codec}</span>}
         {rel.pack && <span className="chip-s">{t('tor.pack')}</span>}
@@ -84,7 +97,8 @@ export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload
     </>
   )
   return (
-    <li className={`trow${active ? ' is-active' : ''}${off ? ' is-off' : ''}`}>
+    <li className={`trow${active ? ' is-active' : ''}${off ? ' is-off' : ''}${open ? ' is-open' : ''}`}>
+      <div className="trow-line">
       {onPlay ? (
         <button
           type="button"
@@ -115,7 +129,102 @@ export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload
           <Icon name={inList ? 'check' : 'download'} size={17} />
         </button>
       )}
+      <button
+        type="button"
+        className="icon-btn trow-more"
+        aria-expanded={open}
+        aria-controls={detailsId}
+        aria-label={t('td.toggle', { name: r.name })}
+        title={open ? t('td.hide') : t('td.show')}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="info" size={16} />
+      </button>
+      </div>
+      {open && <TorrentDetails id={detailsId} r={r} known={known} />}
     </li>
+  )
+}
+
+/** Everything the release name and the sources tell, plus the files once the torrent is known. */
+function TorrentDetails({ id, r, known }: { id: string; r: TorrentResult; known?: Torrent }) {
+  const { t } = useI18n()
+  const rel = r.release
+  const yes = (v: boolean, label: string) => (v ? label : null)
+  const flags = [
+    yes(rel.dual, 'Dual'),
+    rel.dub && t('td.dub', { kind: rel.dub }),
+    yes(rel.proper, 'PROPER'),
+    yes(rel.repack, 'REPACK'),
+    yes(rel['3d'], '3D'),
+    rel.edition,
+    yes(rel.cam, 'CAM'),
+  ].filter(Boolean)
+  const episode =
+    rel.season !== null
+      ? rel.episode !== null
+        ? `S${String(rel.season).padStart(2, '0')}E${String(rel.episode).padStart(2, '0')}`
+        : t('tor.seasonN', { n: rel.season })
+      : null
+  const rows: [string, ReactNode][] = [
+    [t('tf.quality'), formatHeight(rel.height) ?? t('tf.unknown')],
+    [t('tf.source'), rel.source ?? t('tf.unknown')],
+    [t('tf.codec'), [rel.codec, rel.bit_depth && `${rel.bit_depth} Bit`].filter(Boolean).join(' · ') || t('tf.unknown')],
+    [t('tf.hdr'), rel.hdr_all.length > 0 ? rel.hdr_all.join(' · ') : 'SDR'],
+    [t('tf.audio'), [rel.audio, rel.channels].filter(Boolean).join(' · ') || t('tf.unknown')],
+    [t('tf.language'), rel.languages.length > 0 ? rel.languages.map((l) => valueLabel('language', l, t)).join(', ') : t('tf.langNone')],
+    [t('tf.subs'), rel.subtitles.length > 0 ? rel.subtitles.join(', ') : '–'],
+    [t('tf.group'), rel.group ?? '–'],
+  ]
+  if (episode) rows.push([t('td.episode'), rel.pack ? `${episode} (${t('tor.pack')})` : episode])
+  if (rel.year) rows.push([t('td.year'), String(rel.year)])
+  if (flags.length > 0) rows.push([t('td.flags'), flags.join(' · ')])
+  rows.push(
+    [t('td.size'), formatBytes(r.size)],
+    [
+      t('tf.seeders'),
+      r.seeders_unknown && r.seeders === 0
+        ? t('td.seedsUnknown')
+        : r.sources.length > 1
+          ? t('td.seedsSum', { n: r.seeders, max: r.seeders_max })
+          : r.seeders.toLocaleString(),
+    ],
+    [t('td.leechers'), r.leechers.toLocaleString()],
+  )
+  if (r.age_days !== null) rows.push([t('td.age'), t('td.ageDays', { n: r.age_days })])
+  rows.push(
+    [t('td.sources'), r.sources.map(sourceName).join(', ')],
+    [t('td.trackers'), String(r.trackers.length)],
+    [t('td.hash'), <code key="h">{r.infohash}</code>],
+  )
+  const files = known?.files ?? []
+  return (
+    <div className="tdetails" id={id}>
+      <p className="tdetails-name">{r.name}</p>
+      <dl className="tdetails-grid">
+        {rows.map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="tdetails-sub">{t('td.files')}</p>
+      {files.length > 0 ? (
+        <ul className="tdetails-files">
+          {files.map((f) => (
+            <li key={f.index} className={f.index === r.file_index ? 'is-wanted' : undefined}>
+              <span className="tdetails-file" title={f.name}>
+                {f.name}
+              </span>
+              <span>{formatBytes(f.size)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="field-hint">{r.file_index !== null ? t('td.filesLaterIndex', { n: r.file_index + 1 }) : t('td.filesLater')}</p>
+      )}
+    </div>
   )
 }
 
@@ -123,6 +232,17 @@ export function TorrentRow({ r, filter, active, best, inList, onPlay, onDownload
 export function VpnBadge({ vpn, always }: { vpn: Vpn | undefined; always?: boolean }) {
   const { t } = useI18n()
   if (!vpn) return null
+  // Without VPN (allowed by the user): always visible, in the warning colour, whether or not a torrent runs.
+  if (vpn.state !== 'blocked' && (vpn.direct || vpn.route === 'direct')) {
+    const where = vpn.state === 'up' && vpn.country ? t('direct.badgeIn', { country: vpn.country }) : t('direct.badgeTitle')
+    return (
+      <span className="vpn-badge is-direct" title={where} role="status">
+        <Icon name="warn" size={15} stroke={2} />
+        <span>{t('direct.badge')}</span>
+        <span className="sr-only">{where}</span>
+      </span>
+    )
+  }
   if (vpn.state === 'up') {
     const where = vpn.country ? t('vpn.upIn', { country: vpn.country }) : t('vpn.up')
     return (

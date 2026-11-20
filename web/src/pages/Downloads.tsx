@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router'
+import AutoRules from '../components/AutoRules'
 import Icon from '../components/Icon'
+import { VpnImport } from '../components/SetupParts'
 import { EmptyState, ErrorState, PageLoader } from '../components/States'
+import { FilterBar, FilterEmpty, useTorrentFilter } from '../components/TorrentFilters'
+import { DirectSwitch, QueueFields } from '../components/TorrentSettingsParts'
 import { TorrentRow, VpnBadge, VpnNotice } from '../components/Torrents'
 import { useI18n, type Key } from '../i18n'
 import { api, ApiError } from '../lib/api'
@@ -25,10 +29,11 @@ import {
 } from '../lib/torrents'
 import { useTitle } from '../lib/title'
 
-type Tab = 'downloads' | 'suche' | 'einstellungen'
-const TABS: { id: Tab; label: Key; icon: 'download' | 'search' | 'sliders' }[] = [
+type Tab = 'downloads' | 'suche' | 'automatisch' | 'einstellungen'
+const TABS: { id: Tab; label: Key; icon: 'download' | 'search' | 'sliders' | 'clock' }[] = [
   { id: 'downloads', label: 'dl.tabList', icon: 'download' },
   { id: 'suche', label: 'dl.tabSearch', icon: 'search' },
+  { id: 'automatisch', label: 'dl.tabAuto', icon: 'clock' },
   { id: 'einstellungen', label: 'dl.tabSettings', icon: 'sliders' },
 ]
 
@@ -36,7 +41,7 @@ export default function Downloads() {
   const { t } = useI18n()
   const [params, setParams] = useSearchParams()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'suche' || raw === 'einstellungen' ? raw : 'downloads'
+  const tab: Tab = raw === 'suche' || raw === 'einstellungen' || raw === 'automatisch' ? raw : 'downloads'
   useTitle(t(TABS.find((x) => x.id === tab)?.label ?? 'dl.tabList'))
   const list = useTorrents()
   const torrents = list.data?.torrents ?? []
@@ -84,7 +89,9 @@ export default function Downloads() {
             <DownloadList torrents={torrents} vpn={list.data?.vpn} onSearch={() => setParams({ tab: 'suche' }, { replace: true })} />
           )
         ) : tab === 'suche' ? (
-          <FreeSearch listed={new Set(torrents.map((x) => x.id))} />
+          <FreeSearch torrents={torrents} />
+        ) : tab === 'automatisch' ? (
+          <AutoRules />
         ) : (
           <SettingsForm vpn={list.data?.vpn} />
         )}
@@ -95,10 +102,40 @@ export default function Downloads() {
 
 // ---------------------------------------------------------------- list
 
+/** Downloads still to load, in the order the queue serves them: priority first, then age (like the server). */
+function queueOrder(torrents: Torrent[]): Torrent[] {
+  return torrents
+    .filter((x) => x.mode === 'download' && x.state !== 'completed' && x.state !== 'paused')
+    .sort((a, z) => z.priority - a.priority || a.added_at.localeCompare(z.added_at))
+}
+
 function DownloadList({ torrents, vpn, onSearch }: { torrents: Torrent[]; vpn: Vpn | undefined; onSearch: () => void }) {
   const { t } = useI18n()
+  const qc = useQueryClient()
   const [removing, setRemoving] = useState<Torrent | null>(null)
   const [picking, setPicking] = useState<Torrent | null>(null)
+  const queue = queueOrder(torrents)
+  // Moving one step: the whole queue gets fresh priorities in the new order (top = highest).
+  const move = useMutation({
+    mutationFn: async ({ id, by }: { id: string; by: -1 | 1 }) => {
+      const list = [...queue]
+      const i = list.findIndex((x) => x.id === id)
+      const j = i + by
+      if (i < 0 || j < 0 || j >= list.length) return
+      const [a, b] = [list[i], list[j]]
+      if (!a || !b) return
+      list[i] = b
+      list[j] = a
+      const top = Math.min(100, list.length * 2)
+      await Promise.all(
+        list.map((x, k) => {
+          const p = top - k * 2
+          return x.priority === p ? undefined : torrentApi.priority(x.id, p)
+        }),
+      )
+    },
+    onSettled: () => refreshTorrents(qc),
+  })
   if (torrents.length === 0)
     return (
       <EmptyState icon="download" title={t('dl.emptyTitle')} text={t('dl.emptyText')}>
@@ -108,21 +145,98 @@ function DownloadList({ torrents, vpn, onSearch }: { torrents: Torrent[]; vpn: V
         </button>
       </EmptyState>
     )
+  const rest = torrents.filter((x) => !queue.includes(x))
+  const card = (x: Torrent, pos?: number) => (
+    <DownloadCard
+      key={x.id}
+      x={x}
+      onRemove={() => setRemoving(x)}
+      onPick={() => setPicking(x)}
+      queue={
+        pos === undefined
+          ? undefined
+          : {
+              pos,
+              first: pos === 0,
+              last: pos === queue.length - 1,
+              busy: move.isPending,
+              up: () => move.mutate({ id: x.id, by: -1 }),
+              down: () => move.mutate({ id: x.id, by: 1 }),
+            }
+      }
+    />
+  )
   return (
     <>
       {torrents.some((x) => x.state !== 'completed') && <VpnNotice vpn={vpn} />}
-      <ol className="dl-list">
-        {torrents.map((x) => (
-          <DownloadCard key={x.id} x={x} onRemove={() => setRemoving(x)} onPick={() => setPicking(x)} />
-        ))}
-      </ol>
+      <MaxActive running={queue.filter(isActive).length} waiting={queue.filter((x) => x.state === 'queued').length} />
+      {queue.length > 0 && (
+        <>
+          <h2 className="dl-section">{t('dl.queueTitle')}</h2>
+          <ol className="dl-list">{queue.map((x, i) => card(x, i))}</ol>
+        </>
+      )}
+      {rest.length > 0 && (
+        <>
+          {queue.length > 0 && <h2 className="dl-section">{t('dl.otherTitle')}</h2>}
+          <ol className="dl-list">{rest.map((x) => card(x))}</ol>
+        </>
+      )}
+      {move.isError && (
+        <p className="field-error" role="alert">
+          {t('dl.moveFailed')}
+        </p>
+      )}
       {removing && <RemoveDialog x={removing} onClose={() => setRemoving(null)} />}
       {picking && <FilePicker x={picking} onClose={() => setPicking(null)} />}
     </>
   )
 }
 
-function DownloadCard({ x, onRemove, onPick }: { x: Torrent; onRemove: () => void; onPick: () => void }) {
+/** "Gleichzeitig laden: 1 … 10": the server's queue reads it every second, so it acts at once. */
+function MaxActive({ running, waiting }: { running: number; waiting: number }) {
+  const { t } = useI18n()
+  const qc = useQueryClient()
+  const saved = useQuery({ queryKey: ['torrent-settings'], queryFn: torrentApi.settings, retry: false })
+  const save = useMutation({
+    mutationFn: torrentApi.settingsPut,
+    onSuccess: (_v, next) => {
+      qc.setQueryData(['torrent-settings'], next)
+      refreshTorrents(qc)
+    },
+  })
+  const s = saved.data
+  if (!s) return null
+  const set = (n: number) => save.mutate({ ...s, max_active: Math.max(1, Math.min(10, n)) })
+  return (
+    <div className="dl-slots">
+      <span className="dl-slots-label" id="dl-slots-label">
+        {t('dl.maxActive')}
+      </span>
+      <div className="dl-stepper" role="group" aria-labelledby="dl-slots-label">
+        <button type="button" className="icon-btn" onClick={() => set(s.max_active - 1)} disabled={s.max_active <= 1 || save.isPending} aria-label={t('dl.fewer')}>
+          −
+        </button>
+        <output aria-live="polite">{s.max_active}</output>
+        <button type="button" className="icon-btn" onClick={() => set(s.max_active + 1)} disabled={s.max_active >= 10 || save.isPending} aria-label={t('dl.more')}>
+          +
+        </button>
+      </div>
+      <span className="dl-slots-state">{t('dl.slotsState', { a: running, b: waiting })}</span>
+      {save.isError && <span className="field-error">{t('set.saveFailed')}</span>}
+    </div>
+  )
+}
+
+/** The server's disk-space refusal in the user's language: "not enough disk space on D:: 0.7 GB needed, 369.3 GB free". */
+function diskError(error: string | null, t: (k: Key, v?: Record<string, string | number>) => string): string | null {
+  const m = error && /not enough disk space on (.+?): ([\d.]+) GB needed, ([\d.]+) GB free/.exec(error)
+  return m ? t('dl.diskFull', { drive: m[1] ?? '', need: m[2] ?? '', free: m[3] ?? '' }) : null
+}
+
+type QueueCtl = { pos: number; first: boolean; last: boolean; busy: boolean; up: () => void; down: () => void }
+
+function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: () => void; onPick: () => void; queue?: QueueCtl }) {
   const { t } = useI18n()
   const qc = useQueryClient()
   const act = useMutation({
@@ -136,6 +250,7 @@ function DownloadCard({ x, onRemove, onPick }: { x: Torrent; onRemove: () => voi
   const paused = x.state === 'paused'
   const pct = Math.round(x.progress * 1000) / 10
   const eta = formatEta(x.eta_seconds)
+  const disk = x.state === 'error' ? diskError(x.error, t) : null
   const facts = done
     ? [formatBytes(x.total)]
     : [t('dl.ofTotal', { a: formatBytes(x.downloaded), b: formatBytes(x.total) }), eta && t('dl.eta', { eta })]
@@ -148,6 +263,8 @@ function DownloadCard({ x, onRemove, onPick }: { x: Torrent; onRemove: () => voi
         <div className="dl-head">
           <h2 className="dl-title">{torrentTitle(x)}</h2>
           {x.mode === 'stream' && !done && <span className="tag tag-dim">{t('dl.fromStream')}</span>}
+          {x.auto && <span className="tag tag-dim">{t('dl.auto')}</span>}
+          {x.state === 'queued' && <span className="tag">{t('dl.queued')}</span>}
         </div>
         {x.name !== torrentTitle(x) && (
           <p className="dl-name" title={x.name}>
@@ -175,9 +292,31 @@ function DownloadCard({ x, onRemove, onPick }: { x: Torrent; onRemove: () => voi
             <span key={String(f)}>{f}</span>
           ))}
         </p>
-        {x.state === 'error' && x.error && <p className="dl-error">{t('dl.errorHint')}</p>}
+        {x.state === 'error' && x.error && (
+          <p className={`dl-error${disk ? ' is-disk' : ''}`} role={disk ? 'alert' : undefined}>
+            {disk ? (
+              <>
+                <Icon name="warn" size={15} />
+                {disk}
+              </>
+            ) : (
+              t('dl.errorHint')
+            )}
+          </p>
+        )}
+        {x.state === 'checking' && x.downloaded > 0 && <p className="dl-resume">{t('dl.resuming', { size: formatBytes(x.downloaded) })}</p>}
       </div>
       <div className="dl-actions">
+        {queue && (
+          <span className="dl-move" role="group" aria-label={t('dl.queuePos', { n: queue.pos + 1 })}>
+            <button type="button" className="icon-btn dl-up" onClick={queue.up} disabled={queue.first || queue.busy} aria-label={t('dl.moveUp', { title: torrentTitle(x) })} title={t('dl.moveUpShort')}>
+              <Icon name="down" size={15} />
+            </button>
+            <button type="button" className="icon-btn" onClick={queue.down} disabled={queue.last || queue.busy} aria-label={t('dl.moveDown', { title: torrentTitle(x) })} title={t('dl.moveDownShort')}>
+              <Icon name="down" size={15} />
+            </button>
+          </span>
+        )}
         {firstVideo && (
           <Link to={torrentPlayPath(x.id, firstVideo.index)} className={`btn ${done ? 'btn-primary' : 'btn-glass'}`}>
             <Icon name="play" size={16} />
@@ -362,10 +501,10 @@ function FilePicker({ x, onClose }: { x: Torrent; onClose: () => void }) {
 
 // ---------------------------------------------------------------- free search
 
-type Category = 'all' | 'movie' | 'tv'
+type Category = 'all' | 'movie' | 'tv' | 'anime'
 type SortBy = 'best' | 'seeders' | 'size' | 'quality'
 
-function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
+function FreeSearch({ torrents }: { torrents: Torrent[] }) {
   const { t } = useI18n()
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -374,9 +513,19 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
   const [draft, setDraft] = useState(q)
   const [cat, setCat] = useState<Category>('all')
   const [sort, setSort] = useState<SortBy>('best')
-  const [german, setGerman] = useState(false)
-  const [hd, setHd] = useState(false)
-  const res = useQuery({ queryKey: ['torrent-search', q], queryFn: () => torrentApi.search(q), enabled: q.length >= 2, staleTime: 5 * 60_000, retry: false })
+  const tf = useTorrentFilter()
+  const tfKey = tf.params.toString()
+  const anime = cat === 'anime'
+  const res = useQuery({
+    queryKey: ['torrent-search', q, anime, tfKey],
+    queryFn: () => torrentApi.search(q, new URLSearchParams(tfKey), anime),
+    enabled: q.length >= 2,
+    staleTime: 5 * 60_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  })
+  const known = new Map(torrents.map((x) => [x.id, x]))
+  const listed: ReadonlySet<string> = new Set(known.keys())
   const start = useMutation({
     mutationFn: ({ r, mode }: { r: TorrentResult; mode: 'stream' | 'download' }) =>
       torrentApi.start({ magnet: r.magnet, trackers: r.trackers, name: r.name, mode }),
@@ -388,12 +537,7 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
 
   const shown = useMemo(() => {
     const isTv = (r: TorrentResult) => r.release.season !== null || r.release.pack
-    const list = (res.data?.results ?? []).filter(
-      (r) =>
-        (cat === 'all' || (cat === 'tv') === isTv(r)) &&
-        (!german || r.release.languages.includes('de') || r.release.languages.includes('multi')) &&
-        (!hd || (r.release.height ?? 0) >= 1080),
-    )
+    const list = (res.data?.results ?? []).filter((r) => cat === 'all' || cat === 'anime' || (cat === 'tv') === isTv(r))
     const by: Record<SortBy, ((a: TorrentResult, z: TorrentResult) => number) | null> = {
       best: null,
       seeders: (a, z) => z.seeders - a.seeders,
@@ -402,7 +546,7 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
     }
     const cmp = by[sort]
     return cmp ? [...list].sort(cmp) : list
-  }, [res.data, cat, sort, german, hd])
+  }, [res.data, cat, sort])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -413,6 +557,7 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
     { id: 'all', label: 'ts.catAll' },
     { id: 'movie', label: 'ts.catMovies' },
     { id: 'tv', label: 'ts.catTv' },
+    { id: 'anime', label: 'ts.catAnime' },
   ]
   const SORTS: { id: SortBy; label: Key }[] = [
     { id: 'best', label: 'ts.sortBest' },
@@ -452,12 +597,6 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
               </button>
             ))}
           </div>
-          <button type="button" className="chip" aria-pressed={german} onClick={() => setGerman((v) => !v)}>
-            {t('ts.german')}
-          </button>
-          <button type="button" className="chip" aria-pressed={hd} onClick={() => setHd((v) => !v)}>
-            {t('ts.hd')}
-          </button>
           <label className="ts-sort">
             <span className="sr-only">{t('ts.sort')}</span>
             <span className="select">
@@ -487,21 +626,28 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
         <>
           <ul className="ts-sources" aria-label={t('ts.sources')}>
             {res.data.sources
-              .filter((s) => s.status !== 'skipped')
+              .filter((s) => s.status !== 'skipped' && s.status !== 'off')
               .map((s) => (
-                <li key={s.id} className={`ts-source is-${s.status}`} title={s.error ?? undefined}>
+                <li key={s.id} className={`ts-source is-${s.status}`} title={[s.error, `${s.ms} ms`].filter(Boolean).join(' · ')}>
                   {sourceName(s.id)}
                   <span>{s.status === 'ok' ? s.count : s.status === 'blocked' ? t('ts.blocked') : t('ts.failed')}</span>
                 </li>
               ))}
           </ul>
+          {res.data.total > 0 && (
+            <FilterBar data={res.data} busy={res.isPlaceholderData} filter={tf.filter} mode={tf.mode} onFilter={tf.setFilter} onMode={tf.setMode} />
+          )}
           {start.isError && (
             <p className="field-error" role="alert">
-              {start.error instanceof ApiError ? start.error.message : t('tor.downloadFailed')}
+              {start.error instanceof ApiError ? (start.error.code === 'needs_vpn' ? t('direct.needsVpn') : start.error.message) : t('tor.downloadFailed')}
             </p>
           )}
           {shown.length === 0 ? (
-            <EmptyState icon="search" title={t('search.noneTitle')} text={t('ts.none', { q })} />
+            res.data.total > 0 && res.data.matched === 0 ? (
+              <FilterEmpty data={res.data} filter={tf.filter} onFilter={tf.setFilter} />
+            ) : (
+              <EmptyState icon="search" title={t('search.noneTitle')} text={t('ts.none', { q })} />
+            )
           ) : (
             <>
               <p className="ts-count">{t('tor.count', { n: shown.length })}</p>
@@ -510,6 +656,7 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
                   <TorrentRow
                     key={r.infohash}
                     r={r}
+                    known={known.get(r.infohash)}
                     inList={listed.has(r.infohash) || (start.isPending && start.variables?.r.infohash === r.infohash)}
                     onPlay={() => start.mutate({ r, mode: 'stream' })}
                     onDownload={() => start.mutate({ r, mode: 'download' })}
@@ -526,6 +673,7 @@ function FreeSearch({ listed }: { listed: ReadonlySet<string> }) {
 
 // ---------------------------------------------------------------- settings
 
+
 function SettingsForm({ vpn }: { vpn: Vpn | undefined }) {
   const { t } = useI18n()
   const qc = useQueryClient()
@@ -533,7 +681,7 @@ function SettingsForm({ vpn }: { vpn: Vpn | undefined }) {
   const [draft, setDraft] = useState<TorrentSettings | null>(null)
   const form = draft ?? saved.data
   const save = useMutation({
-    mutationFn: torrentApi.settingsPut,
+    mutationFn: torrentApi.settingsSave,
     onSuccess: (_v, next) => {
       qc.setQueryData(['torrent-settings'], next)
       setDraft(null)
@@ -567,17 +715,16 @@ function SettingsForm({ vpn }: { vpn: Vpn | undefined }) {
           <span>{up ? (vpn.country ? t('vpn.upIn', { country: vpn.country }) : t('vpn.up')) : vpn?.state === 'connecting' ? t('vpn.connecting') : t('vpn.downHint')}</span>
         </p>
         <VpnNotice vpn={vpn} noLink />
-        <label className="field">
+        <div className="field">
           <span className="field-label">{t('set.vpnFile')}</span>
-          <span className="set-file">
-            <input className="input" value={form.vpn_config} onChange={(e) => set({ vpn_config: e.target.value })} spellCheck={false} />
-            <span className={`set-found${vpn?.config_found ? ' is-ok' : ' is-bad'}`}>
-              <Icon name={vpn?.config_found ? 'check' : 'warn'} size={14} stroke={2.2} />
-              {vpn?.config_found ? t('set.found') : t('set.notFound')}
-            </span>
-          </span>
           <span className="field-hint">{t('set.vpnFileHint')}</span>
-        </label>
+          {/* The same import as in the first-run setup: the file is checked and stored by the server. */}
+          <VpnImport has={!!vpn?.config_found} onChange={() => refreshTorrents(qc)} />
+          <DirectSwitch />
+          <Link to="/einstellungen#torrents" className="vpn-notice-link">
+            {t('set.moreInSettings')}
+          </Link>
+        </div>
       </section>
 
       <section className="set-card" aria-labelledby="set-dl">
@@ -608,6 +755,7 @@ function SettingsForm({ vpn }: { vpn: Vpn | undefined }) {
           </span>
           <span className="field-hint">{t('set.uploadHint')}</span>
         </label>
+        <QueueFields form={form} set={set} />
       </section>
 
       <div className="set-actions">

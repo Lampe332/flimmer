@@ -88,4 +88,12 @@ Für den Serien-Trockenlauf hatte ich sechs echte Serienregeln in der Testinstan
 - Bild-Untertitel (PGS, VobSub) gehen nicht als Text, die API meldet 415. Externe `.srt`-Dateien im Torrent werden nicht angeboten.
 - Nach einem Neustart prüft die Engine vorhandene Daten neu (13 s bei etwa 3 GB).
 - HEVC wird in Software dekodiert, nur das Kodieren läuft auf der Grafikkarte.
-- Quelle 1337x ist weiterhin durch Cloudflare blockiert. Neue Quellen sind nicht Teil dieses Schritts.
+- Quelle 1337x ist weiterhin durch Cloudflare blockiert. Die 18 neuen Quellen und ihre Messung stehen in [torrent_quellen_kandidaten.md](torrent_quellen_kandidaten.md), Abschnitt 5.
+
+## Nachtrag 21.11.: Oberfläche und Torrents ohne VPN
+
+- Filterleiste mit Zählern aus den Facetten im Player und in der Torrent-Suche. Fight Club, „Deutsch + 1080p + BluRay“: Chips 3 / 3 / 3, Liste 3, API `matched` 3.
+- Tonspur- und Untertitelmenü, Sprung über `/seek`: geprüft an einer lokal aus dem freien Sintel gebauten MKV (Englisch AAC, Deutsch AC3 als Testspur, Untertitel Rumänisch aus dem YTS-Paket). Spurwechsel bei 0:14 startete am Keyframe 0:10, Sprung auf 7:24 lud `play?t=444.5`, Untertitel mit `t=444.333` verschoben und sichtbar. Freie Torrents mit mehreren eingebetteten Tonspuren hatten keine Seeder (sieben Versuche).
+- Warteschlange: `max_active=1` → 1 lädt, 2 warten; „nach oben“ zweimal machte den dritten zum aktiven; auf 3 gestellt → 3 laden, 0 warten.
+- Torrents ohne VPN (nur nach Freigabe): ohne Freigabe und ohne VPN-Datei `409 needs_vpn`. Mit Freigabe lud Tears of Steel (frei) direkt, 33 externe TCP-Verbindungen des Prozesses, Schild „Ohne VPN“. Danach wieder mit VPN-Datei: nur Verbindungen zu Port 443 (die Suche über HTTPS, wie vorgesehen), keine Peer-Verbindung außerhalb des Tunnels.
+- Offen: Untertitel aus Dateien in Windows-1250 kommen mit falschen Umlauten (der Server liest sie als UTF-8). Die Auto-Download-Vorschau für eine Serie mit 10 fälligen Folgen dauerte etwa 2 Minuten (eine Suche pro Folge).

@@ -5,6 +5,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import Footer from './components/Footer'
 import Header from './components/Header'
 import { PageLoader } from './components/States'
+import Toasts from './components/Toasts'
 import Tour, { startTour } from './components/Tour'
 import { useI18n } from './i18n'
 import { START_PAGES, getPrefs, loadPrefs } from './lib/prefs'
@@ -144,6 +145,7 @@ export default function App() {
       </main>
       <Footer />
       <Tour />
+      <Toasts />
     </div>
   )
 }

@@ -369,6 +369,15 @@ pub struct Hit {
     pub exact: bool,
     /// Upload time (unix seconds), when the source tells it.
     pub added: Option<i64>,
+    /// Audio languages the source states besides the name (flags, language lines).
+    pub languages: Vec<&'static str>,
+    /// The source does not report seeders (hash indexes, RSS feeds): `seeders` is no information.
+    pub no_seeds: bool,
+}
+
+/// Audio languages named in a free text ("English + Russian", "German"), as release codes.
+pub fn languages_in(text: &str) -> Vec<&'static str> {
+    all(&LANG, &normalize(text))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -380,6 +389,8 @@ pub struct Torrent {
     pub seeders: u32,
     /// Highest value a single source reported.
     pub seeders_max: u32,
+    /// No source that lists this torrent reports seeders: 0 means "not known", not "dead".
+    pub seeders_unknown: bool,
     pub leechers: u32,
     pub sources: Vec<&'static str>,
     pub trackers: Vec<String>,
@@ -494,7 +505,12 @@ fn score(t: &Torrent, rank: &Ranking) -> i64 {
         - if r.cam { 800 } else { 0 }
         - if matches!(r.dub, Some("mic" | "line")) { 250 } else { 0 }
         - if r.three_d { 150 } else { 0 }
-        - if t.seeders == 0 { 2000 } else { 0 }
+        // Unknown seeders (hash indexes, RSS without numbers) rank below every live swarm, above dead ones.
+        - match (t.seeders, t.seeders_unknown) {
+            (0, true) => 1500,
+            (0, false) => 2000,
+            _ => 0,
+        }
         - if t.below_min { 1200 } else { 0 }
         + if t.exact { 40 } else { 0 }
 }
@@ -502,6 +518,7 @@ fn score(t: &Torrent, rank: &Ranking) -> i64 {
 /// Merges hits with the same infohash (seeders summed, trackers united). Unranked.
 pub fn merge(hits: Vec<Hit>, now_s: i64) -> Vec<Torrent> {
     let mut map: HashMap<String, Torrent> = HashMap::new();
+    let mut langs: HashMap<String, Vec<&'static str>> = HashMap::new();
     let mut order = Vec::new();
     for h in hits {
         let t = map.entry(h.infohash.clone()).or_insert_with(|| {
@@ -512,6 +529,7 @@ pub fn merge(hits: Vec<Hit>, now_s: i64) -> Vec<Torrent> {
                 size: 0,
                 seeders: 0,
                 seeders_max: 0,
+                seeders_unknown: true,
                 leechers: 0,
                 sources: Vec::new(),
                 trackers: Vec::new(),
@@ -529,6 +547,13 @@ pub fn merge(hits: Vec<Hit>, now_s: i64) -> Vec<Torrent> {
             continue;
         }
         t.sources.push(h.source);
+        t.seeders_unknown &= h.no_seeds;
+        let known = langs.entry(h.infohash.clone()).or_default();
+        for l in &h.languages {
+            if !known.contains(l) {
+                known.push(l);
+            }
+        }
         t.seeders += h.seeders;
         t.seeders_max = t.seeders_max.max(h.seeders);
         t.leechers = t.leechers.max(h.leechers);
@@ -552,6 +577,12 @@ pub fn merge(hits: Vec<Hit>, now_s: i64) -> Vec<Torrent> {
     let mut out: Vec<Torrent> = order.into_iter().filter_map(|k| map.remove(&k)).collect();
     for t in &mut out {
         t.release = parse(&t.name);
+        // Languages a source states besides the name (Comet flags, MediaFusion and Zilean lists).
+        for l in langs.remove(&t.infohash).unwrap_or_default() {
+            if !t.release.languages.contains(&l) {
+                t.release.languages.push(l);
+            }
+        }
         t.age_days = t.added.map(|a| ((now_s - a).max(0) / 86_400) as u32);
         t.magnet = magnet(&t.infohash, &t.name, &t.trackers);
     }
@@ -619,7 +650,14 @@ pub fn facet_values(t: &Torrent, dim: &str) -> Vec<String> {
     match dim {
         // "und" = no language stated in the name (by scene convention usually English).
         "language" if r.languages.is_empty() => vec!["und".into()],
-        "language" => r.languages.iter().map(|l| l.to_string()).collect(),
+        // "dl" = German plus the original ("German DL"), a value of its own besides "de".
+        "language" => {
+            let mut out: Vec<String> = r.languages.iter().map(|l| l.to_string()).collect();
+            if r.dual && r.languages.contains(&"de") {
+                out.push("dl".into());
+            }
+            out
+        }
         "sub" => r.subtitles.iter().map(|l| l.to_string()).collect(),
         "res" => one(match r.height {
             Some(h) if h >= 2160 => Some("2160"),
@@ -982,5 +1020,22 @@ mod tests {
         assert_eq!(ids(&query(&[("hdr", "hdr"), ("codec", "hevc")])), "3");
         assert_eq!(ids(&query(&[("group", "ccc")])), "45");
         assert!(Query::from_params(&[("max_size".to_string(), "big".to_string())].into()).is_err());
+    }
+
+    #[test]
+    fn unknown_seeders_rank_between_live_and_dead_and_source_languages_count() {
+        let unknown = Hit { no_seeds: true, languages: vec!["de"], ..hit("zilean", "1", "Film.2020.1080p.BluRay.x264-AAA", 0, &[]) };
+        let dead = hit("a", "2", "Film.2020.1080p.BluRay.x264-BBB", 0, &[]);
+        let live = hit("a", "3", "Film.2020.720p.WEB.x264-CCC", 2, &[]);
+        let out = merge_and_rank(vec![dead, unknown, live], &filter(0, "any", "quality"));
+        assert_eq!(out.iter().map(|t| t.infohash.as_str()).collect::<Vec<_>>(), ["3", "1", "2"]);
+        assert!(out[1].seeders_unknown && !out[2].seeders_unknown);
+        assert_eq!(out[1].release.languages, ["de"]);
+        // A source with numbers makes the merged torrent "known".
+        let both = merge(vec![Hit { no_seeds: true, ..hit("x", "9", "F", 0, &[]) }, hit("y", "9", "F", 4, &[])], 0);
+        assert!(!both[0].seeders_unknown);
+        assert_eq!(languages_in("English + Russian"), ["en", "ru"]);
+        let dl = merge(vec![hit("a", "8", "Film.2020.German.DL.1080p.BluRay.x264-AAA", 3, &[])], 0);
+        assert_eq!(facet_values(&dl[0], "language"), ["de", "en", "dl"]);
     }
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../i18n'
 import { ApiError } from '../../lib/api'
-import { refreshTorrents, torrentApi, torrentLine, useTorrents, vpnProblem, type StartBody } from '../../lib/torrents'
+import { refreshTorrents, torrentApi, torrentLine, useTorrents, vpnProblem, type PlayInfo, type StartBody } from '../../lib/torrents'
 import Icon from '../Icon'
 import { Flicker } from '../States'
 import { VpnBadge, VpnNotice } from '../Torrents'
@@ -18,6 +18,8 @@ type Props = {
   startAt: number
   onTime: (seconds: number) => void
   onSave?: (seconds: number, duration: number) => void
+  /** The file's /playinfo once it is there (next file of a season pack, tracks). */
+  onInfo?: (info: PlayInfo) => void
   resumeHint?: number
   onHintDone?: () => void
   fallback?: { label: string; run: () => void }
@@ -61,6 +63,12 @@ export default function TorrentStage(p: Props) {
     retry: (n, err) => err instanceof ApiError && err.status === 504 && n < 3,
   })
 
+  const onInfo = useRef(p.onInfo)
+  onInfo.current = p.onInfo
+  useEffect(() => {
+    if (play.data) onInfo.current?.(play.data)
+  }, [play.data])
+
   // Leaving: a pure stream stops loading; a download (or a finished file) stays as it is.
   const latest = useRef(tx)
   latest.current = tx
@@ -100,6 +108,8 @@ export default function TorrentStage(p: Props) {
           duration: play.data.duration,
           copyVideo: play.data.copy_video,
           audio: play.data.audio,
+          defaultAudio: play.data.default_audio,
+          subtitles: play.data.subtitles,
           status,
         }}
       />

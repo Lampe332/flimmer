@@ -31,6 +31,14 @@ impl ApiError {
         Self::new(StatusCode::BAD_GATEWAY, message)
     }
 
+    /// No VPN file and torrents without VPN are not allowed: nothing may start.
+    pub fn needs_vpn() -> Self {
+        Self {
+            code: Some("needs_vpn"),
+            ..Self::new(StatusCode::CONFLICT, "no VPN file, and torrents without VPN are turned off in the settings")
+        }
+    }
+
     /// No TMDB token yet: the UI shows the first-run setup.
     pub fn needs_setup() -> Self {
         Self { code: Some("needs_setup"), ..Self::new(StatusCode::SERVICE_UNAVAILABLE, "Flimmer is not set up yet (TMDB token missing)") }

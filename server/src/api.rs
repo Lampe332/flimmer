@@ -79,6 +79,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/vpn/release", post(vpn::release))
         .route("/api/torrents", get(torrent::list))
         .route("/api/torrents/search", get(tsearch::free))
+        .route("/api/torrents/sources", get(tsearch::list_sources))
         .route("/api/torrents/start", post(torrent::start))
         .route("/api/torrents/settings", get(torrent::settings_get).put(torrent::settings_put))
         .route("/api/torrents/announce", get(tracker::shim))

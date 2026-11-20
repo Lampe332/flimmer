@@ -14,7 +14,7 @@ import { api, streamUrl, type Variant } from '../../lib/api'
 import { getLang, t as i18nT, useI18n, type Key, type T } from '../../i18n'
 import { formatBitrate, formatClock, formatHeight, langCode, trackLabel } from '../../lib/format'
 import { variantIndex } from '../../lib/pick'
-import { playUrl, type AudioInfo } from '../../lib/torrents'
+import { playUrl, subtitleUrl, torrentApi, type AudioInfo, type SubtitleInfo } from '../../lib/torrents'
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
 import { PLAYER_KEYS } from '../../lib/keys'
 import { getPrefs, matchesLang, usePrefs } from '../../lib/prefs'
@@ -57,6 +57,10 @@ export type TorrentSource = {
   duration: number | null
   copyVideo: boolean
   audio: AudioInfo[]
+  /** Track to start with (saved audio language, else the file's default). */
+  defaultAudio: number
+  /** Text tracks are served as WebVTT (`/subtitle`); image subtitles are left out. */
+  subtitles: SubtitleInfo[]
   /** Calm state line for the bar, e.g. "Lädt von 34 Quellen · 12 MB/s". */
   status?: string
 }
@@ -193,7 +197,13 @@ export default function VideoPlayer({
   /** Position in the whole video, also while a transcoded seek is still loading. */
   const nowAt = useCallback(() => pendingSeek.current ?? offset.current + (video.current?.currentTime ?? 0), [])
   const isTranscode = () => !!tor.current && tState.current.mode === 'transcode'
-  /** (Re)loads the torrent stream at `at` seconds; keeps playing if it was playing. */
+  /** File time of the current ffmpeg stream's first frame (subtitle cues are moved by it). */
+  const [tStart, setTStart] = useState(0)
+  const loadSeq = useRef(0)
+  /**
+   * (Re)loads the torrent stream at `at` seconds; keeps playing if it was playing. A transcoded stream asks
+   * `/seek` first: a copied video starts at the keyframe before `at`, and that real start becomes the offset.
+   */
   const loadTorrent = useCallback((at: number, autoplay?: boolean) => {
     const el = video.current
     const src = tor.current
@@ -201,11 +211,25 @@ export default function VideoPlayer({
     const s = tState.current
     const direct = s.mode === 'direct'
     const play = autoplay ?? (!el.paused && !el.ended)
-    offset.current = direct ? 0 : Math.max(0, at)
-    el.src = playUrl(src.id, src.file, direct ? {} : { t: at, audio: s.audio, h264: s.h264 })
-    if (direct && at > 0) el.addEventListener('loadedmetadata', () => (el.currentTime = at), { once: true })
-    if (play) void el.play().catch(() => undefined)
+    const seq = ++loadSeq.current
+    const open = (t: number, start: number) => {
+      if (seq !== loadSeq.current) return
+      offset.current = direct ? 0 : Math.max(0, start)
+      setTStart(offset.current)
+      el.src = playUrl(src.id, src.file, direct ? {} : { t, audio: s.audio, h264: s.h264 })
+      if (direct && at > 0) el.addEventListener('loadedmetadata', () => (el.currentTime = at), { once: true })
+      if (play) void el.play().catch(() => undefined)
+    }
     setTime(at)
+    if (direct || at <= 0) return open(at, at)
+    pendingSeek.current = at
+    const done = () => {
+      if (seq === loadSeq.current) pendingSeek.current = null
+    }
+    torrentApi
+      .seek(src.id, src.file, at, s.h264)
+      .then((r) => (done(), open(r.t, r.start)))
+      .catch(() => (done(), open(at, at)))
   }, [])
 
   // ---- progress saving: only once playback really ran, from the last known position ----
@@ -275,8 +299,19 @@ export default function VideoPlayer({
     const src = tor.current
     if (src) {
       tState.current = { mode: src.mode, audio: null, h264: false }
+      // A direct file plays its first track; another saved language needs ffmpeg from the start.
+      const first = src.audio[0]?.index ?? -1
+      if (src.mode === 'direct' && src.audio.length > 1 && src.defaultAudio !== first) {
+        tState.current = { mode: 'transcode', audio: src.defaultAudio, h264: false }
+      }
       setAudios(src.audio.map((a) => ({ id: a.index, lang: a.lang, name: a.title })))
-      setAudio(src.audio.find((a) => a.default)?.index ?? src.audio[0]?.index ?? -1)
+      setAudio(src.audio.some((a) => a.index === src.defaultAudio) ? src.defaultAudio : first)
+      const texts = src.subtitles.filter((x) => x.text)
+      setSubs(texts.map((x) => ({ id: x.index, lang: x.lang, name: x.title })))
+      const want = getPrefs().subLang
+      const forced = texts.find((x) => x.forced && matchesLang(x.lang, want === 'off' ? 'ui' : want))
+      const pick = want !== 'off' ? texts.find((x) => matchesLang(x.lang, want)) : forced
+      setSub(pick?.index ?? -1)
       const onTorrentError = () => {
         const s = tState.current
         const code = el.error?.code
@@ -599,9 +634,18 @@ export default function VideoPlayer({
     if (hls) {
       hls.subtitleDisplay = id >= 0
       hls.subtitleTrack = id
+    } else if (tor.current) {
+      // Torrent: the chosen text track is a <track> fed by /subtitle.
+      setSub(id)
     }
     setMenu(null)
   }, [])
+  // A freshly mounted <track> is not shown by itself in every browser.
+  useEffect(() => {
+    const el = video.current
+    if (!el || !tor.current) return
+    for (const t of Array.from(el.textTracks)) t.mode = sub >= 0 ? 'showing' : 'disabled'
+  }, [sub, tStart])
   // "c": subtitles on (the last chosen track, else the first in the UI language, else the first) or off.
   const lastSub = useRef(-1)
   if (sub >= 0) lastSub.current = sub
@@ -864,7 +908,18 @@ export default function VideoPlayer({
         aria-label={subtitle ? `${title}, ${subtitle}` : title}
         onClick={onVideoClick}
         onDoubleClick={onVideoDoubleClick}
-      />
+      >
+        {torrent && sub >= 0 && (
+          <track
+            key={`${sub}-${tStart}`}
+            kind="subtitles"
+            src={subtitleUrl(torrent.id, torrent.file, sub, tStart)}
+            srcLang={subs.find((x) => x.id === sub)?.lang?.slice(0, 2) ?? undefined}
+            label={subOptions.find((x) => x.id === sub)?.label ?? ''}
+            default
+          />
+        )}
+      </video>
 
       {(waiting || !started) && !fatal && !ended && (
         <div className="vp-center" aria-hidden={started}>

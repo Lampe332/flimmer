@@ -185,7 +185,10 @@ pub struct TunnelStats {
 }
 
 pub struct Tunnel {
-    stack: Mutex<Stack>,
+    /// The WireGuard tunnel's TCP/IP stack; `None` for a direct route (see [`Tunnel::direct`]).
+    stack: Option<Mutex<Stack>>,
+    /// No VPN: sockets go over the PC's normal network. Only when the user allowed torrents without VPN.
+    direct: bool,
     wake: Notify,
     cancel: CancellationToken,
     alive: AtomicBool,
@@ -236,7 +239,8 @@ impl Tunnel {
         let dns = sockets.add(dns::Socket::new(&servers, Vec::new()));
 
         let tunnel = Arc::new(Self {
-            stack: Mutex::new(Stack { iface, sockets, dev, dns, closing: Vec::new(), next_port: 49152 }),
+            stack: Some(Mutex::new(Stack { iface, sockets, dev, dns, closing: Vec::new(), next_port: 49152 })),
+            direct: false,
             wake: Notify::new(),
             cancel: CancellationToken::new(),
             alive: AtomicBool::new(true),
@@ -257,6 +261,27 @@ impl Tunnel {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         Ok(tunnel)
+    }
+
+    /// The same socket interface over the PC's normal network (torrents without VPN, only when the user
+    /// allowed it). Stopping it ends its connections like a tunnel's; it has no incoming port.
+    pub fn direct() -> Arc<Self> {
+        Arc::new(Self {
+            stack: None,
+            direct: true,
+            wake: Notify::new(),
+            cancel: CancellationToken::new(),
+            alive: AtomicBool::new(true),
+            started: Instant::now(),
+            rx_bytes: AtomicU64::new(0),
+            tx_bytes: AtomicU64::new(0),
+            handshake_at: AtomicU64::new(0),
+            gateway: Ipv4Addr::UNSPECIFIED,
+        })
+    }
+
+    pub fn is_direct(&self) -> bool {
+        self.direct
     }
 
     pub fn stop(&self) {
@@ -282,7 +307,8 @@ impl Tunnel {
     }
 
     fn lock(&self) -> MutexGuard<'_, Stack> {
-        self.stack.lock().unwrap_or_else(|e| e.into_inner())
+        // Only WireGuard sockets (handles) reach this; direct sockets never touch the stack.
+        self.stack.as_ref().expect("a WireGuard tunnel has a stack").lock().unwrap_or_else(|e| e.into_inner())
     }
 
     async fn send(&self, udp: &UdpSocket, wire: &[u8]) {
@@ -381,6 +407,13 @@ impl Tunnel {
         if !self.is_alive() {
             return Err(dead());
         }
+        if self.direct {
+            let stream = tokio::time::timeout(CONNECT_TIMEOUT, tokio::net::TcpStream::connect(addr))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connect timed out"))??;
+            let _ = stream.set_nodelay(true);
+            return Ok(TcpConn { tunnel: self.clone(), handle: SocketHandle::default(), direct: Some(stream) });
+        }
         let handle = {
             let mut guard = self.lock();
             let s = &mut *guard;
@@ -392,7 +425,7 @@ impl Tunnel {
             s.sockets.add(socket)
         };
         // From here the guard in `conn` cleans up on every exit path.
-        let conn = TcpConn { tunnel: self.clone(), handle };
+        let conn = TcpConn { tunnel: self.clone(), handle, direct: None };
         self.wake.notify_one();
         let established = poll_fn(|cx| {
             if !self.is_alive() {
@@ -430,6 +463,10 @@ impl Tunnel {
         if !self.is_alive() {
             return Err(dead());
         }
+        if self.direct {
+            // Without VPN nothing listens on the PC's network for peers.
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "no incoming port without VPN"));
+        }
         let listener = Listener { tunnel: self.clone(), port, handles: Mutex::new(Vec::new()) };
         listener.refill()?;
         Ok(listener)
@@ -444,13 +481,18 @@ impl Tunnel {
         if !self.is_alive() {
             return Err(dead());
         }
+        if self.direct {
+            let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+            socket.set_nonblocking(true)?;
+            return Ok(UdpConn { tunnel: self.clone(), handle: SocketHandle::default(), direct: Some(UdpSocket::from_std(socket)?) });
+        }
         let mut guard = self.lock();
         let buffer = || udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; packets], vec![0; bytes]);
         let mut socket = udp::Socket::new(buffer(), buffer());
         let port = guard.port();
         socket.bind(port).map_err(|_| io::Error::other("udp bind failed"))?;
         let handle = guard.sockets.add(socket);
-        Ok(UdpConn { tunnel: self.clone(), handle })
+        Ok(UdpConn { tunnel: self.clone(), handle, direct: None })
     }
 
     /// Resolves through the VPN's DNS server, so not even host names leave outside the tunnel.
@@ -462,6 +504,12 @@ impl Tunnel {
             return Err(dead());
         }
         let failed = || io::Error::new(io::ErrorKind::NotFound, "host not found");
+        if self.direct {
+            let found = tokio::time::timeout(DNS_TIMEOUT, tokio::net::lookup_host((host, 0)))
+                .await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "DNS timed out"))??;
+            return found.filter_map(|a| if let SocketAddr::V4(v4) = a { Some(*v4.ip()) } else { None }).next().ok_or_else(failed);
+        }
         let query = {
             let mut guard = self.lock();
             let s = &mut *guard;
@@ -498,10 +546,11 @@ impl Tunnel {
     }
 }
 
-/// A TCP connection inside the tunnel.
+/// A TCP connection inside the tunnel (or, on a direct route, a plain one).
 pub struct TcpConn {
     tunnel: Arc<Tunnel>,
     handle: SocketHandle,
+    direct: Option<tokio::net::TcpStream>,
 }
 
 impl AsyncRead for TcpConn {
@@ -509,14 +558,18 @@ impl AsyncRead for TcpConn {
         if !self.tunnel.is_alive() {
             return Poll::Ready(Err(dead()));
         }
-        let mut guard = self.tunnel.lock();
-        let socket = guard.sockets.get_mut::<tcp::Socket>(self.handle);
+        let this = self.get_mut();
+        if let Some(stream) = &mut this.direct {
+            return Pin::new(stream).poll_read(cx, buf);
+        }
+        let mut guard = this.tunnel.lock();
+        let socket = guard.sockets.get_mut::<tcp::Socket>(this.handle);
         if socket.can_recv() {
             let n = socket.recv_slice(buf.initialize_unfilled()).map_err(|_| dead())?;
             buf.advance(n);
             drop(guard);
             // The receive window opened: let the stack tell the peer.
-            self.tunnel.wake.notify_one();
+            this.tunnel.wake.notify_one();
             Poll::Ready(Ok(()))
         } else if !socket.may_recv() {
             Poll::Ready(Ok(()))
@@ -532,14 +585,18 @@ impl AsyncWrite for TcpConn {
         if !self.tunnel.is_alive() {
             return Poll::Ready(Err(dead()));
         }
-        let mut guard = self.tunnel.lock();
-        let socket = guard.sockets.get_mut::<tcp::Socket>(self.handle);
+        let this = self.get_mut();
+        if let Some(stream) = &mut this.direct {
+            return Pin::new(stream).poll_write(cx, data);
+        }
+        let mut guard = this.tunnel.lock();
+        let socket = guard.sockets.get_mut::<tcp::Socket>(this.handle);
         if !socket.may_send() {
             Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()))
         } else if socket.can_send() {
             let n = socket.send_slice(data).map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
             drop(guard);
-            self.tunnel.wake.notify_one();
+            this.tunnel.wake.notify_one();
             Poll::Ready(Ok(n))
         } else {
             socket.register_send_waker(cx.waker());
@@ -547,19 +604,29 @@ impl AsyncWrite for TcpConn {
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match &mut self.get_mut().direct {
+            Some(stream) => Pin::new(stream).poll_flush(cx),
+            None => Poll::Ready(Ok(())),
+        }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
-        self.tunnel.lock().sockets.get_mut::<tcp::Socket>(self.handle).close();
-        self.tunnel.wake.notify_one();
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Some(stream) = &mut this.direct {
+            return Pin::new(stream).poll_shutdown(cx);
+        }
+        this.tunnel.lock().sockets.get_mut::<tcp::Socket>(this.handle).close();
+        this.tunnel.wake.notify_one();
         Poll::Ready(Ok(()))
     }
 }
 
 impl Drop for TcpConn {
     fn drop(&mut self) {
+        if self.direct.is_some() {
+            return;
+        }
         let mut guard = self.tunnel.lock();
         guard.sockets.get_mut::<tcp::Socket>(self.handle).abort();
         guard.closing.push(self.handle);
@@ -627,7 +694,7 @@ impl Listener {
             };
             self.refill()?;
             if let Some((handle, from)) = taken {
-                return Ok((TcpConn { tunnel: self.tunnel.clone(), handle }, from));
+                return Ok((TcpConn { tunnel: self.tunnel.clone(), handle, direct: None }, from));
             }
         }
     }
@@ -648,12 +715,16 @@ impl Drop for Listener {
 pub struct UdpConn {
     tunnel: Arc<Tunnel>,
     handle: SocketHandle,
+    direct: Option<UdpSocket>,
 }
 
 impl UdpConn {
     pub fn send_to(&self, data: &[u8], to: SocketAddrV4) -> io::Result<()> {
         if !self.tunnel.is_alive() {
             return Err(dead());
+        }
+        if let Some(socket) = &self.direct {
+            return socket.try_send_to(data, SocketAddr::V4(to)).map(|_| ());
         }
         self.tunnel
             .lock()
@@ -672,6 +743,17 @@ impl UdpConn {
 
     /// Like [`UdpConn::recv`], with the sender's address.
     pub async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddrV4)> {
+        if let Some(socket) = &self.direct {
+            loop {
+                let (n, from) = tokio::select! {
+                    r = socket.recv_from(buf) => r?,
+                    _ = self.tunnel.cancel.cancelled() => return Err(dead()),
+                };
+                if let SocketAddr::V4(from) = from {
+                    return Ok((n, from));
+                }
+            }
+        }
         poll_fn(|cx| {
             if !self.tunnel.is_alive() {
                 return Poll::Ready(Err(dead()));
@@ -695,6 +777,9 @@ impl UdpConn {
 
 impl Drop for UdpConn {
     fn drop(&mut self) {
+        if self.direct.is_some() {
+            return;
+        }
         let mut guard = self.tunnel.lock();
         guard.sockets.get_mut::<udp::Socket>(self.handle).close();
         guard.closing.push(self.handle);

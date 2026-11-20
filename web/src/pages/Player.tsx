@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
+import { useTorrentFilter } from '../components/TorrentFilters'
 import EpisodeList from '../components/EpisodeList'
 import Icon from '../components/Icon'
 import ScanPanel from '../components/player/ScanPanel'
@@ -29,10 +30,15 @@ import {
   torrentApi,
   torrentHasLang,
   useTorrents,
+  type NextFile,
+  type PlayInfo,
   type StartBody,
   type TorrentMedia,
   type TorrentResult,
 } from '../lib/torrents'
+
+/** Router state when "next episode" stays inside a season pack: play that file of that torrent. */
+type PackState = { pack?: { hash: string; file: number; s: number; e: number } }
 import { invalidateWatching, neighbour, resumeTarget, useProgress, type Ep } from '../lib/progress'
 import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
@@ -178,11 +184,15 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const active = chosen ? results.find((r) => r.provider_id === chosen && r.status === 'ok' && r.stream_id) : undefined
 
   // ---- torrents: searched in parallel with the scan, a second group in the panel ----
+  // The filter bar's choice (saved as the user's default) goes to the server, which counts the facets.
+  const tf = useTorrentFilter()
+  const tfKey = tf.params.toString()
   const torQ = useQuery({
-    queryKey: ['torrents-for', type, id, s, e],
-    queryFn: () => torrentApi.forTitle(type, id, s, e),
+    queryKey: ['torrents-for', type, id, s, e, tfKey],
+    queryFn: () => torrentApi.forTitle(type, id, s, e, new URLSearchParams(tfKey)),
     staleTime: 5 * 60_000,
     retry: false,
+    placeholderData: keepPreviousData,
   })
   const torList = useTorrents()
   const vpn = torList.data?.vpn
@@ -191,18 +201,29 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
     [torQ.data, settings.filter, dead],
   )
   const bestTorrent = torrents[0]
-  const activeTorrent = chosen?.startsWith('t:') ? torrents.find((r) => `t:${r.infohash}` === chosen) : undefined
+  // A playing torrent stays on stage even when a new filter hides it from the list.
+  const pinned = useRef<TorrentResult | null>(null)
+  const listedActive = chosen?.startsWith('t:') ? torrents.find((r) => `t:${r.infohash}` === chosen) : undefined
+  if (listedActive) pinned.current = listedActive
+  const activeTorrent = listedActive ?? (pinned.current && `t:${pinned.current.infohash}` === chosen ? pinned.current : undefined)
+  // Next episode inside the season pack that plays now (from /playinfo), and a pack file handed over by that step.
+  const location = useLocation()
+  const packArrived = (location.state as PackState | null)?.pack
+  const pack = packArrived && isTv && packArrived.s === s && packArrived.e === e && !manual ? packArrived : undefined
+  const [packNext, setPackNext] = useState<{ hash: string; from: number; next: NextFile } | null>(null)
+  const onPlayInfo = (hash: string) => (p: PlayInfo) =>
+    setPackNext(p.next_file?.season && p.next_file.episode ? { hash, from: p.file, next: p.next_file } : null)
   const activeKey = active?.provider_id ?? (activeTorrent ? chosen : undefined)
   // The rule itself lives in lib/pick.ts (torrentBeatsProvider): providers first, a torrent only when it clearly wins.
   const torrentWins =
-    vpn?.config_found !== false &&
+    vpn?.route !== 'none' &&
     torrentBeatsProvider(
       best,
       bestTorrent && {
         height: bestTorrent.release.height,
         seeders: bestTorrent.seeders,
         belowMin: bestTorrent.below_min,
-        cam: bestTorrent.release.source === 'CAM',
+        cam: bestTorrent.release.cam,
         hasLang: torrentHasLang(bestTorrent.release, settings.filter.audio_lang),
       },
       settings.filter,
@@ -271,6 +292,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
     onSuccess: () => refreshTorrents(qc),
   })
   const listed = new Set(torList.data?.torrents.filter((x) => x.mode === 'download').map((x) => x.id) ?? [])
+  const known = new Map((torList.data?.torrents ?? []).map((x) => [x.id, x]))
   const fallback =
     others > 0
       ? { label: t('player.otherSource'), run: onFailed }
@@ -368,31 +390,47 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
             </p>
           )}
 
-          <div className={`stage${active || activeTorrent ? ' has-video' : ''}`}>
-            {activeTorrent && progressReady ? (
+          <div className={`stage${active || activeTorrent || pack ? ' has-video' : ''}`}>
+            {(pack || activeTorrent) && progressReady ? (
               <TorrentStage
-                key={activeTorrent.infohash}
-                hash={activeTorrent.infohash}
-                startBody={startBody(activeTorrent, 'stream')}
-                file={activeTorrent.file_index ?? undefined}
-                title={d?.title ?? activeTorrent.release.title}
+                key={pack ? `${pack.hash}-${pack.file}` : activeTorrent?.infohash}
+                hash={pack?.hash ?? activeTorrent?.infohash ?? ''}
+                startBody={pack ? { infohash: pack.hash } : activeTorrent && startBody(activeTorrent, 'stream')}
+                file={pack ? pack.file : (activeTorrent?.file_index ?? undefined)}
+                title={d?.title ?? activeTorrent?.release.title ?? ''}
                 subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
                 startAt={resume.current || savedStart}
                 onTime={(t) => (resume.current = t)}
                 onSave={onSave}
+                onInfo={onPlayInfo(pack?.hash ?? activeTorrent?.infohash ?? '')}
                 resumeHint={!hintDone && savedStart > 0 ? savedStart : undefined}
                 onHintDone={() => setHintDone(true)}
                 fallback={{ label: t('player.otherSource'), run: onFailed }}
                 backdrop={d?.backdrop}
                 next={
-                  nextPlayable
+                  packNext?.next.season && packNext.next.episode
                     ? {
-                        label: t('player.episodeLabel', { s: nextPlayable.s, e: nextPlayable.e }),
-                        name: nextEp?.name,
-                        still: nextEp?.still,
-                        go: () => go(nextPlayable),
+                        // Next episode from the same season pack: no new search, the file is already in the torrent.
+                        label: t('player.episodeLabel', { s: packNext.next.season, e: packNext.next.episode }),
+                        name: nextPlayable && packNext.next.season === nextPlayable.s && packNext.next.episode === nextPlayable.e ? nextEp?.name : undefined,
+                        still: nextPlayable && packNext.next.season === nextPlayable.s && packNext.next.episode === nextPlayable.e ? nextEp?.still : undefined,
+                        go: () => {
+                          const { hash, from, next: n } = packNext
+                          void torrentApi.next(hash, from).catch(() => undefined)
+                          void navigate(playPath('tv', id, n.season ?? s, n.episode ?? e), {
+                            replace: true,
+                            state: { pack: { hash, file: n.file, s: n.season ?? s, e: n.episode ?? e } } satisfies PackState,
+                          })
+                        },
                       }
-                    : undefined
+                    : nextPlayable
+                      ? {
+                          label: t('player.episodeLabel', { s: nextPlayable.s, e: nextPlayable.e }),
+                          name: nextEp?.name,
+                          still: nextEp?.still,
+                          go: () => go(nextPlayable),
+                        }
+                      : undefined
                 }
               />
             ) : active?.stream_id && progressReady ? (
@@ -547,7 +585,14 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
           onRescan={() => (setManual(null), setLocked(null), startScan({ force: true }))}
           torrents={{
             results: torrents,
+            data: torQ.data,
             loading: torQ.isPending,
+            busy: torQ.isPlaceholderData,
+            filter: tf.filter,
+            mode: tf.mode,
+            onFilter: tf.setFilter,
+            onMode: tf.setMode,
+            known,
             error: torQ.error,
             vpn,
             active: activeTorrent?.infohash ?? null,

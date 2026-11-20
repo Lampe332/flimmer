@@ -26,6 +26,42 @@ export interface Prefs {
   autoFullscreen: boolean
   hideFailed: boolean
   tourDone: boolean
+  /** Torrent filters, the same in the player and the torrent search; kept as the user's default. */
+  torrentFilter: TorrentFilter
+  /** Torrent order: "fast" = starts soonest, "quality" = best release. */
+  torrentMode: TorrentMode
+}
+
+/** Facet dimensions of the torrent search (`docs/API.md`, Phase 6). */
+export const FILTER_DIMS = ['language', 'sub', 'res', 'source', 'codec', 'hdr', 'audio', 'channels', 'group'] as const
+export type FilterDim = (typeof FILTER_DIMS)[number]
+export type TorrentMode = 'fast' | 'quality'
+
+export interface TorrentFilter {
+  values: Partial<Record<FilterDim, string[]>>
+  minSeeders: number
+  /** GB; 0 = no limit. */
+  minSizeGb: number
+  maxSizeGb: number
+  /** Show CAM/TS/TC copies too. */
+  cam: boolean
+}
+
+export const EMPTY_FILTER: TorrentFilter = { values: {}, minSeeders: 0, minSizeGb: 0, maxSizeGb: 0, cam: false }
+
+function cleanFilter(raw: unknown): TorrentFilter {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const v = (r.values && typeof r.values === 'object' ? r.values : {}) as Record<string, unknown>
+  const values: TorrentFilter['values'] = {}
+  for (const dim of FILTER_DIMS) {
+    const list = v[dim]
+    if (Array.isArray(list)) {
+      const clean = list.filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length < 40).slice(0, 20)
+      if (clean.length > 0) values[dim] = clean
+    }
+  }
+  const n = (x: unknown, max: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(max, Math.max(0, x)) : 0)
+  return { values, minSeeders: Math.round(n(r.minSeeders, 10_000)), minSizeGb: n(r.minSizeGb, 500), maxSizeGb: n(r.maxSizeGb, 500), cam: r.cam === true }
 }
 
 export const ACCENTS: Accent[] = ['amber', 'rose', 'mint', 'sky']
@@ -50,6 +86,8 @@ export const DEFAULT_PREFS: Prefs = {
   autoFullscreen: false,
   hideFailed: false,
   tourDone: false,
+  torrentFilter: EMPTY_FILTER,
+  torrentMode: 'fast',
 }
 
 const STORE_KEY = 'flimmer.prefs'
@@ -80,6 +118,8 @@ export function cleanPrefs(raw: unknown): Prefs {
     autoFullscreen: bool(r.autoFullscreen, d.autoFullscreen),
     hideFailed: bool(r.hideFailed, d.hideFailed),
     tourDone: bool(r.tourDone, d.tourDone),
+    torrentFilter: cleanFilter(r.torrentFilter),
+    torrentMode: oneOf(r.torrentMode, ['fast', 'quality'] as const, d.torrentMode),
   }
 }
 

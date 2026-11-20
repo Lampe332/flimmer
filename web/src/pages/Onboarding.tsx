@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Icon from '../components/Icon'
 import { Mark } from '../components/Logo'
 import { OpenPage, TokenField, VpnImport } from '../components/SetupParts'
+import { DirectSwitch } from '../components/TorrentSettingsParts'
 import { LANGUAGES, useI18n, type Key } from '../i18n'
 import { ApiError } from '../lib/api'
 import { setupApi, type SetupState } from '../lib/setup'
@@ -202,6 +203,8 @@ function Vpn({ heading, has, onBack, onNext }: HeadingRef & { has: boolean; onBa
         </li>
       </ol>
       <VpnImport has={imported} onChange={() => setImported(true)} />
+      {/* No Proton plan: torrents can still run, without VPN, after a clear warning. */}
+      <DirectSwitch compact onChange={() => setImported(true)} />
       <Nav
         onBack={onBack}
         next={

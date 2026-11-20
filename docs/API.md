@@ -364,6 +364,32 @@ interface Decision { rule: string; title: string; season: number | null; episode
 
 **Auto-next from a season pack.** `PlayInfo.next_file` and `/next` name the next episode. When a progress save (`PUT /api/progress/tv/:id`) passes the middle of an episode that plays from a pack, the next episode's file is selected and its start fetched.
 
+## Phase 7: more search sources, source switches, torrents without VPN
+
+**Search sources.** 27 sources, listed in this order in `TorrentSearch.sources` (`SourceStatus.status` also `"off"` = turned off in the settings). New: Comet (two instances), TorrentsDB, MediaFusion, Peerflix (Stremio add-ons, IMDb id), BitSearch, Torrents-CSV, TorrentDownloads, TorrentDownload.info, Zilean, BT4G, TorrentKitty, Rutor, and for anime SubsPlease, AnimeTosho, TokyoTosho, DMHY, Mikan. Endpoints and test results: [torrent_quellen_kandidaten.md](torrent_quellen_kandidaten.md); KickassTorrents is left out (magnet only on a detail page per hit, the site timed out). Each source has the 12 s timeout; a source that answers 403/429/503 is not asked again for 10 minutes (status `blocked`, "refused a moment ago"). Anime sources only run for anime titles (TMDB animation with original language ja/zh/ko; they are asked with the romaji title from TMDB's alternative titles, an episode as "Title 05") or for `GET /api/torrents/search?q=…&anime=1`.
+
+```ts
+// TorrentResult plus: seeders_unknown: boolean   // no source of this torrent reports seeders: 0 = not known
+// Release.languages also takes languages a source states besides the name (Comet flags, MediaFusion and Zilean lists)
+// facets.language also has "dl" = German plus the original ("German DL"); filter with language=dl
+interface SourceInfo { id: string; imdb: boolean; anime: boolean; default_on: boolean; seeders: boolean; on: boolean }
+// TorrentSettings plus:
+//   sources_off: string[]   // default: torrentkitty, rutor, dmhy, mikan
+//   allow_direct: boolean   // torrents may run without VPN (default false)
+//   direct: boolean         // without VPN even when a VPN file is there (needs allow_direct)
+// Vpn plus: route: "vpn" | "direct" | "none"; direct: boolean (the open route is the normal network); direct_allowed: boolean
+```
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/torrents/sources` | `SourceInfo[]` in status-list order |
+| PUT | `/api/torrents/settings` | also `sources_off` (unknown ids → `400`; a change empties the 5-minute search cache), `allow_direct`, `direct` (`direct` without `allow_direct` → `400`) |
+| POST | `/api/torrents/start` | `409 { code: "needs_vpn" }` when `Vpn.route` is `"none"`: no VPN file and torrents without VPN not allowed |
+
+Ranking: a torrent with unknown seeders gets −1500 instead of −2000 for "no seeders", so it sorts below every live swarm and above dead ones.
+
+**Torrents without VPN (route).** `route` follows the settings: a VPN file and `direct` off → `"vpn"`, exactly as in Phase 5/6 (kill-switch, no fallback: a tunnel that cannot start or drops never turns into a direct route). `allow_direct` on and (`direct` on or no VPN file) → `"direct"`: the same SOCKS server, tracker client and DHT client use the PC's normal network instead of the tunnel; PEX as usual; nothing listens for incoming peers (no forwarded port); seeding stays off after a finished download and the upload limit stays. No VPN file and `allow_direct` off → `"none"`: nothing starts. Changing the route closes the current one; the next active torrent opens the new one. The UI asks for a one-time confirmation before `allow_direct` (upload while loading, real IP visible, legal risk) and shows "Ohne VPN" in the warning colour wherever the VPN state is shown.
+
 ## Setup, preferences and data (1.0)
 
 Flimmer runs without `config.json`. Until a TMDB token is stored, every TMDB-backed endpoint answers

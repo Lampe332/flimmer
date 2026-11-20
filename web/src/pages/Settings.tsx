@@ -6,6 +6,7 @@ import Icon, { type IconName } from '../components/Icon'
 import { OpenPage, TokenField, VpnImport } from '../components/SetupParts'
 import { startTour } from '../components/Tour'
 import { VpnBadge } from '../components/Torrents'
+import { DirectSwitch, QueueFields, SourceList } from '../components/TorrentSettingsParts'
 import { LANGUAGES, useI18n, type Key } from '../i18n'
 import { ApiError, api, type AudioLang, type MinHeight, type Settings as ScanSettings, type SortKey } from '../lib/api'
 import { ACCENTS, COUNTDOWNS, START_PAGES, loadPrefs, resetLocalPrefs, setPrefs, usePrefs, type Accent } from '../lib/prefs'
@@ -333,7 +334,7 @@ function Torrents() {
   const [confirm, setConfirm] = useState(false)
   const form = draft ?? saved.data
   const save = useMutation({
-    mutationFn: torrentApi.settingsPut,
+    mutationFn: torrentApi.settingsSave,
     onSuccess: (_v, next) => {
       qc.setQueryData(['torrent-settings'], next)
       setDraft(null)
@@ -352,10 +353,12 @@ function Torrents() {
 
   return (
     <Section id="torrents" title={t('pref.torrents')} icon="download">
+      {!vpn?.direct_allowed && (
       <p className="pref-note">
         <Icon name="shield" size={16} />
         {t('pref.vpnOnly')}
       </p>
+      )}
       <div className="pref-row">
         <div className="pref-text">
           <span className="pref-label">{t('set.vpnFile')}</span>
@@ -364,6 +367,7 @@ function Torrents() {
         <VpnBadge vpn={vpn} always />
       </div>
       <VpnImport has={!!vpn?.config_found} onChange={() => refreshTorrents(qc)} />
+      <DirectSwitch />
       {vpn?.config_found && (
         <div className="pref-actions">
           {!confirm ? (
@@ -415,6 +419,7 @@ function Torrents() {
             </span>
             <span className="field-hint">{t('set.uploadHint')}</span>
           </label>
+          <QueueFields form={form} set={set} />
           <div className="set-actions">
             {save.isError && (
               <p className="field-error" role="alert">
@@ -436,6 +441,7 @@ function Torrents() {
           </div>
         </form>
       )}
+      <SourceList />
     </Section>
   )
 }

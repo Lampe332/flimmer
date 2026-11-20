@@ -5,14 +5,26 @@ import type { AudioLang, Filter, MinHeight, Scan, ScanResult, Settings, SortKey 
 import { formatBitrate, formatHeight, formatMs, langCode } from '../../lib/format'
 import { fit, rank } from '../../lib/pick'
 import { usePrefs } from '../../lib/prefs'
-import type { TorrentResult, Vpn } from '../../lib/torrents'
+import type { TorrentFilter, TorrentMode } from '../../lib/prefs'
+import type { Torrent, TorrentResult, TorrentSearch, Vpn } from '../../lib/torrents'
 import Icon from '../Icon'
+import { FilterBar, FilterEmpty } from '../TorrentFilters'
 import { TorrentRow, VpnBadge, VpnNotice } from '../Torrents'
 
 /** The torrent group under the provider list. */
 export type TorrentGroup = {
   results: TorrentResult[]
+  /** The whole answer (facets, counts) for the filter bar. */
+  data: TorrentSearch | undefined
   loading: boolean
+  /** New filter counts are on the way. */
+  busy: boolean
+  filter: TorrentFilter
+  mode: TorrentMode
+  onFilter: (f: TorrentFilter) => void
+  onMode: (m: TorrentMode) => void
+  /** Torrents of the download list by infohash (their files are known). */
+  known: ReadonlyMap<string, Torrent>
   error: unknown
   vpn: Vpn | undefined
   /** Infohash that plays right now. */
@@ -294,7 +306,7 @@ function TorrentSection({ g, filter }: { g: TorrentGroup; filter: Filter }) {
   const hidden = g.results.length - shown.length
   const anyListed = g.results.some((r) => g.listed.has(r.infohash))
   let state = t('tor.searching')
-  if (!g.loading) state = g.error ? t('tor.searchFailedShort') : t('tor.count', { n: g.results.length })
+  if (!g.loading) state = g.error ? t('tor.searchFailedShort') : t('tor.count', { n: g.data?.matched ?? g.results.length })
   return (
     <section className="tgroup" aria-labelledby="tgroup-title">
       <header className="tgroup-head">
@@ -308,10 +320,17 @@ function TorrentSection({ g, filter }: { g: TorrentGroup; filter: Filter }) {
         <VpnBadge vpn={g.vpn} />
       </header>
       <VpnNotice vpn={g.vpn} compact />
+      {!g.error && (g.data?.total ?? 0) > 0 && (
+        <FilterBar data={g.data} busy={g.busy} filter={g.filter} mode={g.mode} onFilter={g.onFilter} onMode={g.onMode} compact />
+      )}
       {g.loading ? null : g.error ? (
         <p className="scan-empty">{t('tor.searchFailed')}</p>
       ) : g.results.length === 0 ? (
-        <p className="scan-empty">{t('tor.none')}</p>
+        g.data && g.data.total > 0 ? (
+          <FilterEmpty data={g.data} filter={g.filter} onFilter={g.onFilter} />
+        ) : (
+          <p className="scan-empty">{t('tor.none')}</p>
+        )
       ) : (
         <ol className="scan-list tlist">
           {shown.map((r) => (
@@ -319,6 +338,7 @@ function TorrentSection({ g, filter }: { g: TorrentGroup; filter: Filter }) {
               key={r.infohash}
               r={r}
               filter={filter}
+              known={g.known.get(r.infohash)}
               active={r.infohash === g.active}
               best={r.infohash === g.best}
               inList={g.listed.has(r.infohash) || g.downloading === r.infohash}

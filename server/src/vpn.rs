@@ -2,6 +2,10 @@
 //! only network path the torrent engine gets. Tunnel down = SOCKS refuses = no torrent traffic at all
 //! (kill-switch by construction, there is no fallback route).
 //!
+//! Without VPN ([`Route::Direct`], only when the user allowed it in the settings): the same SOCKS
+//! server, tracker client and DHT use [`Tunnel::direct`], i.e. the PC's normal network. A VPN file that
+//! is present still means the tunnel unless "direct" was chosen; a failing tunnel never turns direct.
+//!
 //! Incoming peers: the VPN server is asked (NAT-PMP, through the tunnel) for a forwarded port; a
 //! listener *inside the tunnel* takes the connections arriving on it and hands them to the engine's
 //! loopback listener. Nothing listens on a real network interface of the PC.
@@ -58,8 +62,32 @@ struct Shared {
     forward_error: Option<String>,
 }
 
+/// Which way torrent traffic goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// Through the WireGuard tunnel (a VPN file is there and "direct" is not chosen).
+    Vpn,
+    /// Over the PC's normal network: the user allowed it and chose it, or allowed it and has no VPN file.
+    Direct,
+    /// No VPN file and torrents without VPN are not allowed: nothing may start.
+    None,
+}
+
+/// The route for these settings. A VPN file present means the tunnel unless the user picked "direct":
+/// a broken tunnel never falls back to the normal network.
+pub fn route_for(allow_direct: bool, prefer_direct: bool, has_conf: bool) -> Route {
+    match (allow_direct, prefer_direct, has_conf) {
+        (true, true, _) | (true, false, false) => Route::Direct,
+        (_, _, true) => Route::Vpn,
+        _ => Route::None,
+    }
+}
+
 pub struct Vpn {
     conf: Mutex<PathBuf>,
+    /// Torrents without VPN are allowed (settings, off by default) / chosen as the route.
+    allow_direct: AtomicBool,
+    prefer_direct: AtomicBool,
     shared: Mutex<Shared>,
     gate: tokio::sync::Mutex<()>,
     blocked: AtomicBool,
@@ -99,6 +127,12 @@ pub struct VpnStatus {
     incoming_live: u64,
     /// DHT nodes known from the last lookups.
     dht_nodes: usize,
+    /// "vpn" | "direct" | "none": the way torrents go with the current settings.
+    route: &'static str,
+    /// The open route is the normal network (no VPN).
+    direct: bool,
+    /// Torrents without VPN are allowed in the settings.
+    direct_allowed: bool,
 }
 
 /// One NAT-PMP mapping request (RFC 6886): `protocol` 1 = UDP, 2 = TCP. Asks for any public port.
@@ -154,6 +188,8 @@ impl Vpn {
             .map_err(|e| format!("http client: {e}"))?;
         let vpn = Arc::new(Self {
             conf: Mutex::new(conf),
+            allow_direct: AtomicBool::new(false),
+            prefer_direct: AtomicBool::new(false),
             shared: Mutex::default(),
             gate: tokio::sync::Mutex::new(()),
             blocked: AtomicBool::new(false),
@@ -254,7 +290,25 @@ impl Vpn {
     }
 
     pub fn set_conf(&self, conf: PathBuf) {
+        let before = self.route();
         *self.conf.lock().unwrap() = conf;
+        if self.route() != before {
+            self.down();
+        }
+    }
+
+    /// Applies "torrents without VPN" from the settings; a changed route closes the current one.
+    pub fn set_direct(&self, allow: bool, prefer: bool) {
+        let before = self.route();
+        self.allow_direct.store(allow, Ordering::SeqCst);
+        self.prefer_direct.store(prefer, Ordering::SeqCst);
+        if self.route() != before {
+            self.down();
+        }
+    }
+
+    pub fn route(&self) -> Route {
+        route_for(self.allow_direct.load(Ordering::SeqCst), self.prefer_direct.load(Ordering::SeqCst), self.conf.lock().unwrap().is_file())
     }
 
     pub fn is_blocked(&self) -> bool {
@@ -275,9 +329,18 @@ impl Vpn {
         if let Some(t) = self.current() {
             return Ok(t);
         }
+        let route = self.route();
+        if route == Route::None {
+            let e = "no VPN file, and torrents without VPN are turned off in the settings".to_owned();
+            self.shared.lock().unwrap().error = Some(e.clone());
+            return Err(e);
+        }
         self.connecting.store(true, Ordering::SeqCst);
         let conf = self.conf.lock().unwrap().clone();
         let result = async {
+            if route == Route::Direct {
+                return Ok(Tunnel::direct());
+            }
             // Only the error kind: the message could quote the path, never the content.
             let text = tokio::fs::read_to_string(&conf)
                 .await
@@ -292,7 +355,10 @@ impl Vpn {
                 *shared = Shared { tunnel: Some(tunnel.clone()), since: Some(now_ms()), ..Shared::default() };
                 drop(shared);
                 tokio::spawn(self.clone().lookup_public_ip(tunnel.clone()));
-                tokio::spawn(self.clone().forward_port(tunnel.clone()));
+                // A forwarded port only exists at the VPN server; without VPN nothing listens for peers.
+                if !tunnel.is_direct() {
+                    tokio::spawn(self.clone().forward_port(tunnel.clone()));
+                }
                 Ok(tunnel)
             }
             Err(e) => {
@@ -338,6 +404,13 @@ impl Vpn {
     }
 
     pub fn status(&self) -> VpnStatus {
+        // Both lock `conf`: read them before the status literal, whose temporaries live to its end.
+        let config_found = self.conf.lock().unwrap().is_file();
+        let route = match self.route() {
+            Route::Vpn => "vpn",
+            Route::Direct => "direct",
+            Route::None => "none",
+        };
         let shared = self.shared.lock().unwrap();
         let tunnel = shared.tunnel.as_ref().filter(|t| t.is_alive());
         let stats = tunnel.map(|t| t.stats());
@@ -358,12 +431,15 @@ impl Vpn {
             rx_bytes: stats.map_or(0, |s| s.rx_bytes),
             tx_bytes: stats.map_or(0, |s| s.tx_bytes),
             error: shared.error.clone(),
-            config_found: self.conf.lock().unwrap().is_file(),
+            config_found,
             forwarded_port: tunnel.and(shared.forwarded),
             port_forward_error: tunnel.and(shared.forward_error.clone()),
             incoming_total: self.incoming_total.load(Ordering::Relaxed),
             incoming_live: self.incoming_live.load(Ordering::Relaxed),
             dht_nodes: self.nodes.len(),
+            route,
+            direct: tunnel.is_some_and(|t| t.is_direct()),
+            direct_allowed: self.allow_direct.load(Ordering::SeqCst),
         }
     }
 
@@ -452,6 +528,20 @@ pub async fn release(State(st): St) -> StatusCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_needs_permission_for_direct_and_never_falls_back() {
+        // A VPN file means the tunnel, even when direct is allowed.
+        assert_eq!(route_for(false, false, true), Route::Vpn);
+        assert_eq!(route_for(true, false, true), Route::Vpn);
+        // Direct only when allowed: chosen, or no VPN file.
+        assert_eq!(route_for(true, true, true), Route::Direct);
+        assert_eq!(route_for(true, false, false), Route::Direct);
+        assert_eq!(route_for(false, false, false), Route::None);
+        // "Direct" chosen but not allowed (old setting): never direct.
+        assert_eq!(route_for(false, true, false), Route::None);
+        assert_eq!(route_for(false, true, true), Route::Vpn);
+    }
 
     #[test]
     fn natpmp_messages() {

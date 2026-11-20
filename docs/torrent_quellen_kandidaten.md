@@ -108,4 +108,33 @@ Nicht neu gezählt: `solidtorrents.to` (gleiche Seite wie BitSearch), TPB-HTML-M
 
 Zuerst für Deutsch und Menge: BitSearch (1), Comet (2, 3), TorrentsDB (4), Zilean (8), TorrentDownload.info (10), TorrentDownloads (9), BT4G (11), Torrents-CSV (7). Für Anime: SubsPlease (17), AnimeTosho (15), TokyoTosho (16, mit Kategorie-Filter). Der Rest ist Ergänzung. Quellen ohne Seeders (Zilean, BT4G, TorrentKitty, DMHY, Mikan) im Ranking nach unten, Duplikate über den Infohash zusammenführen.
 
+## 5. Eingebaut (21.11.2026)
+
+18 der 19 Quellen sind in `server/src/tsearch.rs`, zusammen mit den 9 alten sind es 27. KickassTorrents fehlt: der Magnet steht nur auf einer Detailseite pro Treffer, und die Seite lief beim Einbau zweimal in ein Timeout. Parser-Tests mit gekürzten echten Antworten liegen in `server/tests/fixtures/tsearch/`. Anfangs aus (Einstellungen → Torrents → Suchquellen): TorrentKitty, Rutor, DMHY, Mikan. Die Anime-Quellen laufen nur bei Anime (TMDB-Animation aus Japan, China, Korea) oder bei der freien Suche mit Kategorie „Anime“.
+
+Messung auf der Testinstanz (Status · Treffer · ms; Anime-Spalte = freie Suche „frieren“ mit `anime=1`):
+
+| Quelle | „sintel“ | Film 550 (Fight Club) | „frieren“ Anime |
+|---|---|---|---|
+| Comet | skipped (IMDb) | ok · 855 · 40 | skipped |
+| Comet (Weebs) | skipped | ok · 873 · 23 | skipped |
+| TorrentsDB | skipped | ok · 87 · 85 | skipped |
+| MediaFusion | skipped | ok · 25 · 12 | skipped |
+| Peerflix | skipped | ok · 6 · 74 | skipped |
+| BitSearch | ok · 20 · 404 | ok · 18 · 399 | ok · 20 · 404 |
+| Torrents-CSV | ok · 3 · 22 | ok · 24 · 23 | ok · 25 · 39 |
+| TorrentDownloads | ok · 50 · 10 | ok · 50 · 137 | ok · 50 · 129 |
+| TorrentDownload.info | ok · 27 · 97 | ok · 47 · 108 | ok · 50 · 107 |
+| Zilean | ok · 4 · 22 | ok · 189 · 49 | ok · 20 · 30 |
+| BT4G | ok · 15 · 79 | ok · 15 · 84 | ok · 15 · 124 |
+| TorrentKitty | ok · 7 · 11 | ok · 20 · 14 | ok · 20 · 827 |
+| Rutor | ok · 7 · 63 | ok · 34 · 63 | ok · 12 · 63 |
+| SubsPlease | skipped (Anime) | skipped | ok · 90 · 158 |
+| AnimeTosho | skipped | skipped | ok · 73 · 46 |
+| TokyoTosho | skipped | skipped | error (Timeout 10 s) |
+| DMHY | skipped | skipped | ok · 60 · 619 |
+| Mikan | skipped | skipped | ok · 100 · 73 |
+
+Alte Quellen im selben Lauf: Torrentio 496, Knaben 75, YTS 3, Pirate Bay 198, TheRARBG 95, LimeTorrents 39, Nyaa 0 (Film 550); 1337x weiter `blocked` (Cloudflare) und danach 10 Minuten in Ruhe. Zusammen: „sintel“ 110 Torrents, Film 550 1061, „frieren“ 536. TokyoTosho brauchte schon beim Prüfen 4 bis 8 s und reißt die 10-s-Grenze öfter.
+
 Quellen der Endpunkte: eigene Tests 20.11.2026. Stremio-Stream-Format: Stremio-Addon-SDK (`/stream/<type>/<id>.json`). Torznab-/Indexer-Kataloge wie Jackett wurden nicht gebraucht, jeder Endpunkt oben ist direkt getestet.
