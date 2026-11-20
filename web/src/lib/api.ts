@@ -136,6 +136,61 @@ export interface Genre {
   name: string
 }
 
+/** Saved position of a movie or one episode. Times in seconds. */
+export interface Progress {
+  type: MediaType
+  id: number
+  season: number | null
+  episode: number | null
+  position: number
+  duration: number
+  finished: boolean
+  updated_at: string
+}
+
+/** What a progress save / "gesehen" mark carries along so lists render without TMDB calls. */
+export interface WatchMeta {
+  item: Item
+  episode_name?: string | null
+  still?: string | null
+}
+
+export interface ContinueEntry {
+  item: Item
+  season: number | null
+  episode: number | null
+  episode_name: string | null
+  still: string | null
+  position: number
+  duration: number
+  /** Previous episode finished: this one is next and not started yet. */
+  up_next: boolean
+  updated_at: string
+}
+
+export interface HistoryEntry {
+  entry: number
+  item: Item
+  season: number | null
+  episode: number | null
+  episode_name: string | null
+  still: string | null
+  position: number
+  duration: number
+  finished: boolean
+  watched_at: string
+}
+
+export interface NewEpisode {
+  item: Item
+  season: number
+  episode: number
+  name: string
+  still: string | null
+  air_date: string
+  count: number
+}
+
 export type ListKind = 'popular' | 'top_rated' | 'trending' | 'now_playing' | 'on_the_air'
 
 /** Error with HTTP status; status 0 = backend unreachable. */
@@ -207,6 +262,29 @@ export const api = {
   /** Stops the prefetch of a stream and frees its cache; the stream itself stays playable. */
   streamRelease: (streamId: string) =>
     request<void>(`/stream/${encodeURIComponent(streamId)}`, { method: 'DELETE', keepalive: true }),
+  progress: (type: MediaType, id: number) => request<Progress[]>(`/progress/${type}/${id}`),
+  /** keepalive: also delivered when the page is being closed. */
+  progressPut: (type: MediaType, id: number, s: number, e: number, body: WatchMeta & { position: number; duration: number }) =>
+    request<void>(`/progress/${type}/${id}${episodeQuery(type, s, e)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, item: toItem(body.item) }),
+      keepalive: true,
+    }),
+  markWatched: (type: MediaType, id: number, s: number, e: number, meta: WatchMeta) =>
+    request<void>(`/watched/${type}/${id}${episodeQuery(type, s, e)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...meta, item: toItem(meta.item) }),
+    }),
+  markUnwatched: (type: MediaType, id: number, s: number, e: number) =>
+    request<void>(`/watched/${type}/${id}${episodeQuery(type, s, e)}`, { method: 'DELETE' }),
+  continueList: () => request<ContinueEntry[]>('/continue'),
+  continueHide: (type: MediaType, id: number) => request<void>(`/continue/${type}/${id}`, { method: 'DELETE' }),
+  history: () => request<HistoryEntry[]>('/history'),
+  historyDelete: (entry: number) => request<void>(`/history/${entry}`, { method: 'DELETE' }),
+  historyClear: () => request<void>('/history', { method: 'DELETE' }),
+  newEpisodes: () => request<NewEpisode[]>('/new-episodes'),
   watchlist: () => request<Item[]>('/watchlist'),
   watchlistAdd: (item: Item) =>
     request<void>(`/watchlist/${item.type}/${item.id}`, {

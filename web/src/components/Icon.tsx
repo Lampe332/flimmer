@@ -27,6 +27,8 @@ export type IconName =
   | 'bolt'
   | 'warn'
   | 'app'
+  | 'clock'
+  | 'trash'
 
 const paths: Record<IconName, string> = {
   play: 'M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z',
@@ -57,6 +59,8 @@ const paths: Record<IconName, string> = {
   bolt: 'M13 3 5 13.5h6L10.5 21 19 10h-6Z',
   warn: 'M12 4 2.8 19.5h18.4ZM12 10v4.5M12 17.3v.2',
   app: 'M3.5 5h17v11h-17zM9 20h6M12 16v4',
+  clock: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18ZM12 7.5V12l3 2',
+  trash: 'M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9l1-12.5M10 11v5M14 11v5',
 }
 
 const filled: Partial<Record<IconName, true>> = { play: true, pause: true, next: true, star: true }

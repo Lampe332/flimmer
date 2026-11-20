@@ -3,7 +3,7 @@ use serde_json::Value;
 
 const IMG: &str = "https://image.tmdb.org/t/p";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MediaType {
     Movie,
@@ -38,6 +38,16 @@ pub struct Item {
     pub backdrop: Option<String>,
     pub rating: Option<f64>,
     pub overview: String,
+}
+
+/// What the UI hands over with a progress save, kept so lists render without TMDB calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchMeta {
+    pub item: Item,
+    #[serde(default)]
+    pub episode_name: Option<String>,
+    #[serde(default)]
+    pub still: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

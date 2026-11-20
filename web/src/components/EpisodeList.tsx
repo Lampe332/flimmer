@@ -1,14 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
-import { api, playPath } from '../lib/api'
+import { api, playPath, type Item } from '../lib/api'
 import { formatDate, isUpcoming } from '../lib/format'
+import { ratio, remaining, useMarkEpisode, useProgress } from '../lib/progress'
 import Icon from './Icon'
 import { ErrorState } from './States'
 
-type Props = { tvId: number; season: number; current?: number; compact?: boolean }
+/** `series` enables the "gesehen" toggle (it is stored with the mark). */
+type Props = { tvId: number; season: number; current?: number; compact?: boolean; series?: Item }
 
-export default function EpisodeList({ tvId, season, current, compact }: Props) {
+export default function EpisodeList({ tvId, season, current, compact, series }: Props) {
   const q = useQuery({ queryKey: ['season', tvId, season], queryFn: () => api.season(tvId, season) })
+  const progress = useProgress('tv', tvId)
+  const mark = useMarkEpisode(tvId)
 
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
 
@@ -38,11 +42,15 @@ export default function EpisodeList({ tvId, season, current, compact }: Props) {
         const upcoming = isUpcoming(ep.air_date)
         const date = formatDate(ep.air_date)
         const active = current === ep.episode_number
+        const p = progress.data?.find((r) => r.season === season && r.episode === ep.episode_number)
+        const seen = !!p?.finished
+        const started = !!p && !seen && p.position >= 30 && p.duration > 0
+        const canMark = !!series && !upcoming
         return (
-          <li key={ep.episode_number}>
+          <li key={ep.episode_number} className="episode-item">
             <Link
               to={playPath('tv', tvId, season, ep.episode_number)}
-              className={`episode${active ? ' is-current' : ''}${upcoming ? ' is-upcoming' : ''}`}
+              className={`episode${active ? ' is-current' : ''}${upcoming ? ' is-upcoming' : ''}${seen ? ' is-seen' : ''}${canMark ? ' has-mark' : ''}`}
               aria-current={active ? 'true' : undefined}
               replace={compact}
             >
@@ -51,6 +59,11 @@ export default function EpisodeList({ tvId, season, current, compact }: Props) {
                 <span className="episode-play" aria-hidden="true">
                   <Icon name="play" size={18} />
                 </span>
+                {started && (
+                  <span className="progress-bar" aria-hidden="true">
+                    <span style={{ transform: `scaleX(${ratio(p.position, p.duration)})` }} />
+                  </span>
+                )}
               </div>
               <div className="episode-text">
                 <h3 className="episode-name">
@@ -60,10 +73,36 @@ export default function EpisodeList({ tvId, season, current, compact }: Props) {
                 <p className="episode-meta">
                   {upcoming ? `Erscheint am ${date ?? 'unbekannten Datum'}` : date}
                   {ep.runtime ? `, ${ep.runtime} Min.` : ''}
+                  {seen && (
+                    <span className="episode-state is-seen">
+                      <Icon name="check" size={13} stroke={2.4} />
+                      Gesehen
+                    </span>
+                  )}
+                  {started && <span className="episode-state">{remaining(p.position, p.duration)}</span>}
                 </p>
                 {!compact && ep.overview && <p className="episode-overview">{ep.overview}</p>}
               </div>
             </Link>
+            {canMark && series && (
+              <button
+                type="button"
+                className={`episode-mark${seen ? ' is-seen' : ''}`}
+                aria-pressed={seen}
+                aria-label={seen ? `Folge ${ep.episode_number} als ungesehen markieren` : `Folge ${ep.episode_number} als gesehen markieren`}
+                title={seen ? 'Ungesehen' : 'Als gesehen markieren'}
+                onClick={() =>
+                  mark.mutate({
+                    s: season,
+                    e: ep.episode_number,
+                    watched: !seen,
+                    meta: { item: series, episode_name: ep.name, still: ep.still },
+                  })
+                }
+              >
+                <Icon name="check" size={17} stroke={2.2} />
+              </button>
+            )}
           </li>
         )
       })}

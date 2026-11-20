@@ -6,6 +6,7 @@ mod db;
 mod error;
 mod hls;
 mod model;
+mod progress;
 mod scan;
 pub mod sniff;
 mod stream;

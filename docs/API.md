@@ -1,4 +1,4 @@
-# Flimmer API (Phase 1)
+# Flimmer API (Phase 1–3)
 
 Server: Rust (axum) on `http://127.0.0.1:43300`. All JSON. All TMDB texts in `config.language` (default `de-DE`).
 Image fields are full URLs (`https://image.tmdb.org/t/p/w500/...` for posters, `.../w1280/...` for backdrops, `.../w300/...` for stills/profiles) or `null`.
@@ -110,5 +110,57 @@ interface BufferState { variant: number; from_seconds: number; ahead_seconds: nu
 
 A stream whose upstream starts failing (403/410, expired token) → `/api/stream/...` returns `410 { "error": "expired" }`; the UI then re-scans that provider with `force=1`.
 Cache housekeeping: on start, delete `data/cache/*` older than 24 h.
+
+## Phase 3: watch progress, Weiterschauen, Verlauf, Neue Folgen
+
+A movie is addressed as `/:type/:id`, an episode as `/tv/:id?s=&e=` (`s`/`e` required for tv, like `/api/sources`). Positions are seconds. Timestamps are ISO 8601 UTC (`2026-11-20T03:46:31Z`).
+**Finished** = position ≥ 90 % of the duration, or less than 3 min left (only for titles of 10 min or more).
+Stored in SQLite: `progress` (one row per movie/episode) and `history` (watching sessions; watching the same movie/episode again within 6 h updates its entry instead of adding one).
+
+```ts
+interface WatchMeta { item: Item; episode_name?: string | null; still?: string | null } // stored with the row so lists need no TMDB call; item = the movie / the series
+
+interface Progress {
+  type: MediaType; id: number;
+  season: number | null; episode: number | null;   // null for movies
+  position: number; duration: number; finished: boolean; updated_at: string;
+}
+
+interface ContinueEntry {
+  item: Item;
+  season: number | null; episode: number | null;
+  episode_name: string | null; still: string | null;
+  position: number; duration: number;              // 0 / 0 for a not yet started next episode
+  up_next: boolean;                                // previous episode finished (or this one barely started): play from the start
+  updated_at: string;
+}
+
+interface HistoryEntry {
+  entry: number;                                   // id for DELETE
+  item: Item; season: number | null; episode: number | null;
+  episode_name: string | null; still: string | null;
+  position: number; duration: number; finished: boolean; watched_at: string;
+}
+
+interface NewEpisode {
+  item: Item;                                      // the series
+  season: number; episode: number;                 // first new episode
+  name: string; still: string | null; air_date: string; // YYYY-MM-DD
+  count: number;                                   // new episodes of this series, this one included
+}
+```
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/progress/:type/:id` | `Progress[]` of that title (tv: every episode with a row, in episode order) |
+| PUT | `/api/progress/:type/:id?s=&e=` | body `WatchMeta & { position, duration }` → `204`. Server decides `finished`; a save brings the title back into Weiterschauen. Adds/updates a history entry when position ≥ 30 s or finished. UI saves every 10 s while playing, on pause, seek, end and when leaving (`fetch` with `keepalive`) |
+| PUT | `/api/watched/:type/:id?s=&e=` | body `WatchMeta` → `204`; "Als gesehen markieren" (finished, no history entry) |
+| DELETE | `/api/watched/:type/:id?s=&e=` | `204`; "Ungesehen": deletes the progress row |
+| GET | `/api/continue` | `ContinueEntry[]`, max 20, most recent first. One entry per title: unfinished movie (≥ 30 s), unfinished episode, or for a finished episode the next aired one of that series (skips episodes already marked watched, crosses into the next season; TMDB tv details + season, cached 6 h) |
+| DELETE | `/api/continue/:type/:id` | `204`; hides the title from Weiterschauen (positions are kept; the next save shows it again) |
+| GET | `/api/history` | `HistoryEntry[]`, newest first, max 500 |
+| DELETE | `/api/history/:entry` | `204`; removes one entry |
+| DELETE | `/api/history` | `204`; clears the history (progress and "gesehen" marks stay) |
+| GET | `/api/new-episodes` | `NewEpisode[]`, newest air date first. Series = tv titles with progress (furthest episode seen) plus tv titles on the watchlist (max 60). New = episodes of the season of TMDB `last_episode_to_air` that aired in the last 30 days and come after the furthest episode seen. TMDB data cached 6 h |
 
 Everything not under `/api/` serves the built web UI (`web/dist`), unknown paths fall back to `index.html` (SPA routing).

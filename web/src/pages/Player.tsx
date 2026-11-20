@@ -16,33 +16,17 @@ import {
   type MediaType,
   type Scan,
   type ScanResult,
-  type Season,
   type Settings,
 } from '../lib/api'
-import { formatDate, formatHeight } from '../lib/format'
+import { formatDate, formatHeight, isUpcoming } from '../lib/format'
 import { rank } from '../lib/pick'
+import { invalidateWatching, neighbour, useProgress, type Ep } from '../lib/progress'
 import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
-
-type Ep = { s: number; e: number }
 
 /** Server defaults, used until the saved settings have loaded. */
 const DEFAULTS: Settings = { filter: { min_height: 0, audio_lang: 'any', sort: 'quality' }, prefetch_minutes: 10 }
 const NO_SCAN: Scan = { state: 'unavailable', started_at: null, finished_at: null, results: [] }
-
-function neighbour(seasons: Season[], cur: Ep, dir: 1 | -1): Ep | null {
-  const idx = seasons.findIndex((x) => x.season_number === cur.s)
-  const here = seasons[idx]
-  if (!here) return null
-  if (dir === 1) {
-    if (cur.e < here.episode_count) return { s: cur.s, e: cur.e + 1 }
-    const next = seasons[idx + 1]
-    return next && next.episode_count > 0 ? { s: next.season_number, e: 1 } : null
-  }
-  if (cur.e > 1) return { s: cur.s, e: cur.e - 1 }
-  const prev = seasons[idx - 1]
-  return prev && prev.episode_count > 0 ? { s: prev.season_number, e: prev.episode_count } : null
-}
 
 export default function Player() {
   const { type, id: idRaw } = useParams()
@@ -65,12 +49,14 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const [draft, setDraft] = useState<Settings | null>(null)
   const [viewSeason, setViewSeason] = useState(s)
   const resume = useRef(0)
+  const [hintDone, setHintDone] = useState(false)
   const retried = useRef(new Set<string>())
 
   const details = useQuery({ queryKey: ['title', type, id], queryFn: () => api.title(type, id) })
   const season = useQuery({ queryKey: ['season', id, s], queryFn: () => api.season(id, s), enabled: isTv })
   const caps = useQuery({ queryKey: ['caps'], queryFn: api.caps, staleTime: 60_000, retry: false })
   const saved = useQuery({ queryKey: ['settings'], queryFn: api.settings, staleTime: Infinity, retry: false })
+  const progress = useProgress(type, id)
   const sniffer = caps.data?.sniffer === true
   const settings = draft ?? saved.data ?? DEFAULTS
 
@@ -169,6 +155,25 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const seasons = d?.seasons ?? []
   const next = isTv ? neighbour(seasons, { s, e }, 1) : null
   const prev = isTv ? neighbour(seasons, { s, e }, -1) : null
+  const nextSeason = useQuery({
+    queryKey: ['season', id, next?.s],
+    queryFn: () => api.season(id, next?.s ?? 1),
+    enabled: isTv && !!next && next.s !== s,
+  })
+  const nextEp = next ? (next.s === s ? season.data : nextSeason.data)?.episodes.find((x) => x.episode_number === next.e) : undefined
+  const nextPlayable = next && !isUpcoming(nextEp?.air_date ?? null) ? next : null
+
+  // Resume from the saved position unless that movie/episode was finished.
+  const savedPos = progress.data?.find((r) => (isTv ? r.season === s && r.episode === e : true))
+  const savedStart = savedPos && !savedPos.finished && savedPos.position >= 5 ? savedPos.position : 0
+  const progressReady = progress.isFetched || progress.isError
+  const onSave = (position: number, duration: number) => {
+    if (!d) return
+    api
+      .progressPut(type, id, s, e, { position, duration, item: d, episode_name: episode?.name ?? null, still: episode?.still ?? null })
+      .then(() => invalidateWatching(qc, type, id))
+      .catch(() => undefined)
+  }
   const go = (to: Ep) => navigate(playPath('tv', id, to.s, to.e), { replace: true })
   const epLabel = isTv ? `Staffel ${s}, Folge ${e}` : undefined
   const checked = results.filter((r) => r.status !== 'pending' && r.status !== 'running').length
@@ -203,7 +208,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
           )}
 
           <div className={`stage${active ? ' has-video' : ''}`}>
-            {active?.stream_id ? (
+            {active?.stream_id && progressReady ? (
               <VideoPlayer
                 key={active.stream_id}
                 streamId={active.stream_id}
@@ -211,10 +216,22 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                 variants={active.variants}
                 title={d?.title ?? ''}
                 subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
-                startAt={resume.current}
+                startAt={resume.current || savedStart}
                 onTime={(t) => (resume.current = t)}
                 onExpired={onExpired}
-                next={next ? { label: `Staffel ${next.s}, Folge ${next.e}`, go: () => go(next) } : undefined}
+                onSave={onSave}
+                resumeHint={!hintDone && savedStart > 0 ? savedStart : undefined}
+                onHintDone={() => setHintDone(true)}
+                next={
+                  nextPlayable
+                    ? {
+                        label: `Staffel ${nextPlayable.s}, Folge ${nextPlayable.e}`,
+                        name: nextEp?.name,
+                        still: nextEp?.still,
+                        go: () => go(nextPlayable),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <>
@@ -333,7 +350,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
             <h2 className="row-title">Folgen</h2>
             <SeasonTabs seasons={seasons} value={viewSeason} onChange={setViewSeason} />
           </div>
-          <EpisodeList tvId={id} season={viewSeason} current={viewSeason === s ? e : undefined} compact />
+          <EpisodeList tvId={id} season={viewSeason} current={viewSeason === s ? e : undefined} compact series={d} />
         </section>
       )}
     </div>

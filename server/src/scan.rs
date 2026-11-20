@@ -123,7 +123,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// `2026-11-20T18:04:05Z` from Unix milliseconds.
-fn iso(ms: i64) -> String {
+pub(crate) fn iso(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // civil-from-days (Howard Hinnant)

@@ -21,7 +21,12 @@ type Props = {
   onTime: (seconds: number) => void
   /** The upstream stopped serving this stream (HTTP 410). */
   onExpired: () => void
-  next?: { label: string; go: () => void }
+  next?: { label: string; name?: string; still?: string | null; go: () => void }
+  /** Called with the position to remember: every 10 s while playing, on pause, seek, end and when leaving. */
+  onSave?: (seconds: number, duration: number) => void
+  /** Saved position this playback resumed from; shows "Fortgesetzt bei …" with a restart button. */
+  resumeHint?: number
+  onHintDone?: () => void
 }
 
 type Option = { id: number; label: string; hint?: string }
@@ -29,8 +34,26 @@ type MenuId = 'quality' | 'audio' | 'subs'
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 const IDLE_MS = 2800
+const SAVE_EVERY_MS = 10_000
+/** Credits shortcut: offer the next episode this many seconds before the end. */
+const UP_NEXT_S = 30
+const UP_NEXT_COUNTDOWN = 8
+const HINT_MS = 8000
 
-export default function VideoPlayer({ streamId, kind, variants, title, subtitle, startAt, onTime, onExpired, next }: Props) {
+export default function VideoPlayer({
+  streamId,
+  kind,
+  variants,
+  title,
+  subtitle,
+  startAt,
+  onTime,
+  onExpired,
+  next,
+  onSave,
+  resumeHint,
+  onHintDone,
+}: Props) {
   const wrap = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
   const bar = useRef<HTMLDivElement>(null)
@@ -61,8 +84,32 @@ export default function VideoPlayer({ streamId, kind, variants, title, subtitle,
   const [prefetching, setPrefetching] = useState(false)
 
   // Latest callbacks/props for the long-lived listeners below.
-  const live = useRef({ onTime, onExpired, variants, startAt })
-  live.current = { onTime, onExpired, variants, startAt: live.current.startAt }
+  const live = useRef({ onTime, onExpired, onSave, variants, startAt })
+  live.current = { onTime, onExpired, onSave, variants, startAt: live.current.startAt }
+
+  // ---- progress saving: only once playback really ran, from the last known position ----
+  const pos = useRef({ time: startAt, duration: 0, played: false })
+  const save = useCallback(() => {
+    const p = pos.current
+    if (p.played && p.duration > 0) live.current.onSave?.(p.time, p.duration)
+  }, [])
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') save()
+    }
+    window.addEventListener('pagehide', save)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      window.removeEventListener('pagehide', save)
+      document.removeEventListener('visibilitychange', onHide)
+      save()
+    }
+  }, [save])
+  useEffect(() => {
+    if (!playing) return
+    const t = window.setInterval(save, SAVE_EVERY_MS)
+    return () => window.clearInterval(t)
+  }, [playing, save])
 
   // ---- prefetch: ask the server to load ahead from the current position (debounced) ----
   const prefetchTimer = useRef<number | undefined>(undefined)
@@ -217,12 +264,13 @@ export default function VideoPlayer({ streamId, kind, variants, title, subtitle,
     }
     const on: [keyof HTMLMediaElementEventMap, () => void][] = [
       ['play', () => (setPlaying(true), setEnded(false))],
-      ['pause', () => setPlaying(false)],
+      ['pause', () => (setPlaying(false), save())],
       ['waiting', () => setWaiting(true)],
       ['canplay', () => setWaiting(false)],
       [
         'playing',
         () => {
+          pos.current.played = true
           setWaiting(false)
           setStarted((was) => {
             if (!was) prefetchRef.current()
@@ -230,15 +278,29 @@ export default function VideoPlayer({ streamId, kind, variants, title, subtitle,
           })
         },
       ],
-      ['seeked', () => prefetchRef.current()],
-      ['timeupdate', () => (setTime(el.currentTime), live.current.onTime(el.currentTime))],
-      ['durationchange', () => setDuration(Number.isFinite(el.duration) ? el.duration : 0)],
+      ['seeked', () => (prefetchRef.current(), (pos.current.time = el.currentTime), save())],
+      [
+        'timeupdate',
+        () => {
+          setTime(el.currentTime)
+          live.current.onTime(el.currentTime)
+          if (pos.current.played) pos.current.time = el.currentTime
+        },
+      ],
+      [
+        'durationchange',
+        () => {
+          const d = Number.isFinite(el.duration) ? el.duration : 0
+          setDuration(d)
+          pos.current.duration = d
+        },
+      ],
       ['progress', ranges],
-      ['ended', () => (setEnded(true), setPlaying(false))],
+      ['ended', () => (setEnded(true), setPlaying(false), (pos.current.time = pos.current.duration), save())],
     ]
     on.forEach(([name, fn]) => el.addEventListener(name, fn))
     return () => on.forEach(([name, fn]) => el.removeEventListener(name, fn))
-  }, [])
+  }, [save])
 
   useEffect(() => {
     const el = video.current
@@ -393,6 +455,50 @@ export default function VideoPlayer({ streamId, kind, variants, title, subtitle,
     setScrub(null)
   }
 
+  // ---- up next: countdown card in the last 30 s and at the end ----
+  const nextRef = useRef(next)
+  nextRef.current = next
+  const [upNextOff, setUpNextOff] = useState(false)
+  const [count, setCount] = useState(UP_NEXT_COUNTDOWN)
+  const nearEnd = !!next && started && !fatal && duration > 60 && (ended || duration - time <= UP_NEXT_S)
+  const upNext = nearEnd && !upNextOff
+  const ticking = upNext && (playing || ended) && scrub === null
+  useEffect(() => {
+    if (!nearEnd) setUpNextOff(false)
+  }, [nearEnd])
+  useEffect(() => {
+    if (!upNext) setCount(UP_NEXT_COUNTDOWN)
+  }, [upNext])
+  useEffect(() => {
+    if (!ticking) return
+    const t = window.setInterval(() => setCount((c) => Math.max(0, c - 1)), 1000)
+    return () => window.clearInterval(t)
+  }, [ticking])
+  useEffect(() => {
+    if (upNext && count === 0) nextRef.current?.go()
+  }, [upNext, count])
+
+  // ---- "Fortgesetzt bei …" ----
+  const [hintGone, setHintGone] = useState(false)
+  const showHint = !!resumeHint && started && !hintGone && !fatal && !upNext
+  const hintDone = useRef(onHintDone)
+  hintDone.current = onHintDone
+  useEffect(() => {
+    if (!showHint) return
+    const t = window.setTimeout(() => {
+      setHintGone(true)
+      hintDone.current?.()
+    }, HINT_MS)
+    return () => window.clearTimeout(t)
+  }, [showHint])
+  const restart = () => {
+    seekTo(0)
+    setHintGone(true)
+    hintDone.current?.()
+    const el = video.current
+    if (el?.paused) void el.play().catch(() => undefined)
+  }
+
   const shown = scrub ?? time
   const pct = (seconds: number) => (duration > 0 ? clamp((seconds / duration) * 100, 0, 100) : 0)
   const ahead = buffer.data && prefetching && buffer.data.ahead_seconds > 0 ? buffer.data : null
@@ -440,7 +546,42 @@ export default function VideoPlayer({ streamId, kind, variants, title, subtitle,
         </div>
       )}
 
-      {ended && !fatal && (
+      {showHint && resumeHint !== undefined && (
+        <div className="vp-resume" role="status">
+          <span>Fortgesetzt bei {formatClock(resumeHint)}</span>
+          <button type="button" className="vp-resume-btn" onClick={restart}>
+            <Icon name="refresh" size={15} />
+            Von vorn
+          </button>
+        </div>
+      )}
+
+      {upNext && next && (
+        <section className="vp-upnext" aria-label="Nächste Folge">
+          {next.still && <img className="vp-upnext-still" src={next.still} alt="" />}
+          <div className="vp-upnext-body">
+            <p className="vp-upnext-kicker">Nächste Folge in {count} s</p>
+            <p className="vp-upnext-title">{next.label}</p>
+            {next.name && <p className="vp-upnext-name">{next.name}</p>}
+            <div className="vp-upnext-actions">
+              <button type="button" className="btn btn-primary vp-upnext-go" onClick={next.go}>
+                <span
+                  className="vp-upnext-fill"
+                  aria-hidden="true"
+                  style={{ transform: `scaleX(${(UP_NEXT_COUNTDOWN - count) / UP_NEXT_COUNTDOWN})` }}
+                />
+                <Icon name="play" size={16} />
+                Jetzt abspielen
+              </button>
+              <button type="button" className="btn btn-glass" onClick={() => setUpNextOff(true)}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {ended && !fatal && !upNext && (
         <div className="vp-overlay">
           {next ? (
             <>

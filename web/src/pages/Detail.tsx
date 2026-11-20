@@ -10,6 +10,7 @@ import SeasonTabs from '../components/SeasonTabs'
 import { ErrorState, PageLoader } from '../components/States'
 import { api, isMediaType, playPath } from '../lib/api'
 import { formatRating, formatRuntime, typeLabel } from '../lib/format'
+import { epCode, remaining, resumeTarget, useProgress } from '../lib/progress'
 import { useTitle } from '../lib/title'
 import NotFound from './NotFound'
 
@@ -28,6 +29,7 @@ export default function Detail() {
     enabled: valid,
   })
 
+  const progress = useProgress(type as 'movie' | 'tv', id, valid)
   useTitle(q.data?.title)
 
   if (!valid) return <NotFound />
@@ -38,8 +40,15 @@ export default function Detail() {
   const rating = formatRating(d.rating)
   const runtime = formatRuntime(d.runtime)
   const firstSeason = d.seasons[0]?.season_number
+  const rows = progress.data ?? []
+  const movieRow = d.type === 'movie' ? rows[0] : undefined
+  const movieResume = movieRow && !movieRow.finished && movieRow.position >= 30 ? movieRow : undefined
+  const tvResume = d.type === 'tv' ? resumeTarget(rows, d.seasons) : null
+  const tvStarted = tvResume?.row && !tvResume.row.finished && tvResume.row.position >= 30 ? tvResume.row : undefined
   const seasonParam = Number(params.get('staffel'))
-  const season = d.seasons.some((s) => s.season_number === seasonParam) ? seasonParam : firstSeason
+  const hasSeason = (n: number | undefined) => d.seasons.some((s) => s.season_number === n)
+  // Without a chosen season, open the one "Weiterschauen" continues in.
+  const season = hasSeason(seasonParam) ? seasonParam : hasSeason(tvResume?.s) ? tvResume?.s : firstSeason
   const browse = d.type === 'movie' ? '/filme' : '/serien'
   const seasonCount = d.seasons.length
 
@@ -77,10 +86,24 @@ export default function Detail() {
           {d.original_title && d.original_title !== d.title && <p className="detail-original">{d.original_title}</p>}
           {d.tagline && <p className="detail-tagline">{d.tagline}</p>}
           <div className="actions">
-            <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className="btn btn-primary btn-lg">
-              <Icon name="play" size={18} />
-              {d.type === 'tv' ? 'Ab Folge 1 abspielen' : 'Abspielen'}
-            </Link>
+            {tvResume ? (
+              <Link to={playPath('tv', d.id, tvResume.s, tvResume.e)} className="btn btn-primary btn-lg">
+                <Icon name="play" size={18} />
+                Weiterschauen {epCode(tvResume.s, tvResume.e)}
+                {tvStarted && <span className="btn-note">{remaining(tvStarted.position, tvStarted.duration)}</span>}
+              </Link>
+            ) : movieResume ? (
+              <Link to={playPath('movie', d.id)} className="btn btn-primary btn-lg">
+                <Icon name="play" size={18} />
+                Weiterschauen
+                <span className="btn-note">{remaining(movieResume.position, movieResume.duration)}</span>
+              </Link>
+            ) : (
+              <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className="btn btn-primary btn-lg">
+                <Icon name="play" size={18} />
+                {d.type === 'tv' ? 'Ab Folge 1 abspielen' : 'Abspielen'}
+              </Link>
+            )}
             {d.trailer_youtube_key && (
               <button type="button" className="btn btn-glass btn-lg" onClick={() => setTrailer(true)}>
                 <Icon name="film" size={18} />
@@ -118,7 +141,7 @@ export default function Detail() {
               onChange={(n) => setParams({ staffel: String(n) }, { replace: true })}
             />
           </div>
-          <EpisodeList tvId={d.id} season={season} />
+          <EpisodeList tvId={d.id} season={season} series={d} />
         </section>
       )}
 

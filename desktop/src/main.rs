@@ -1,4 +1,4 @@
-//! Flimmer desktop app: runs the Flimmer server in-process on 127.0.0.1:43300, gives it a
+//! Flimmer desktop app: runs the Flimmer server in-process on 127.0.0.1:43300 (`--port` to change), gives it a
 //! stream sniffer (hidden WebView2 windows) and shows the web UI in the main window.
 
 #![allow(non_snake_case)] // binary name `Flimmer`
@@ -57,6 +57,20 @@ fn find_root() -> Option<PathBuf> {
     exe.ancestors().skip(1).find(|d| d.join("providers.json").is_file()).map(Path::to_path_buf)
 }
 
+/// `--port <n>`, else the default port.
+fn find_port() -> Result<u16, String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--port" {
+            return args
+                .next()
+                .and_then(|p| p.parse().ok())
+                .ok_or_else(|| "--port braucht eine Zahl zwischen 1 und 65535.".to_owned());
+        }
+    }
+    Ok(flimmer::DEFAULT_PORT)
+}
+
 fn fail(msg: &str) -> ! {
     // SAFETY: plain Win32 call with valid, NUL-terminated strings owned by this frame.
     unsafe {
@@ -76,6 +90,7 @@ fn main() {
     let Some(root) = find_root() else {
         fail("Flimmer-Ordner nicht gefunden (providers.json fehlt). Start mit --root <Ordner>.")
     };
+    let port = find_port().unwrap_or_else(|e| fail(&e));
     let log = Log::open(&root.join("data").join("logs").join("desktop.log"));
     let webview_data = root.join("data").join("webview");
 
@@ -90,7 +105,7 @@ fn main() {
                 sniffer::WebviewSniffer::new(app.handle().clone(), webview_data.join("scan"), ext, log.clone());
             let opts = flimmer::Options {
                 root: root.clone(),
-                port: flimmer::DEFAULT_PORT,
+                port,
                 sniffer: Some(Arc::new(sniffer)),
             };
             let server = match tauri::async_runtime::block_on(flimmer::bind(opts)) {

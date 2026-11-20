@@ -11,6 +11,7 @@ const Search = lazy(() => import('./pages/Search'))
 const Detail = lazy(() => import('./pages/Detail'))
 const Player = lazy(() => import('./pages/Player'))
 const Watchlist = lazy(() => import('./pages/Watchlist'))
+const History = lazy(() => import('./pages/History'))
 const NotFound = lazy(() => import('./pages/NotFound'))
 
 function ScrollToTop() {
@@ -43,6 +44,7 @@ export default function App() {
             <Route path="/titel/:type/:id" element={<Detail />} />
             <Route path="/play/:type/:id" element={<Player />} />
             <Route path="/merkliste" element={<Watchlist />} />
+            <Route path="/verlauf" element={<History />} />
             <Route path="*" element={<NotFound />} />
               </Routes>
             </div>

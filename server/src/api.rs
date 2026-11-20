@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::{
     db::Db,
+    progress,
     scan::{self, Scans},
     sniff::Sniffer,
     stream::{self, Streams},
@@ -39,8 +40,8 @@ pub struct AppState {
     pub streams: Streams,
 }
 
-type St = State<Arc<AppState>>;
-type Params = Query<HashMap<String, String>>;
+pub(crate) type St = State<Arc<AppState>>;
+pub(crate) type Params = Query<HashMap<String, String>>;
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -62,6 +63,13 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/stream/{id}/buffer", get(stream::buffer))
         .route("/api/stream/{id}", axum::routing::delete(stream::delete))
         .route("/api/settings", get(scan::settings_get).put(scan::settings_put))
+        .route("/api/progress/{type}/{id}", get(progress::of_title).put(progress::put))
+        .route("/api/watched/{type}/{id}", axum::routing::put(progress::watched).delete(progress::unwatched))
+        .route("/api/continue", get(progress::continue_list))
+        .route("/api/continue/{type}/{id}", axum::routing::delete(progress::continue_hide))
+        .route("/api/history", get(progress::history).delete(progress::history_clear))
+        .route("/api/history/{entry}", axum::routing::delete(progress::history_delete))
+        .route("/api/new-episodes", get(progress::new_episodes))
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .with_state(state)
@@ -69,11 +77,11 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 // ---------- validation ----------
 
-fn media_type(s: &str) -> ApiResult<MediaType> {
+pub(crate) fn media_type(s: &str) -> ApiResult<MediaType> {
     MediaType::parse(s).ok_or_else(|| ApiError::bad_request("type must be 'movie' or 'tv'"))
 }
 
-fn numeric_id(s: &str) -> ApiResult<u64> {
+pub(crate) fn numeric_id(s: &str) -> ApiResult<u64> {
     if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
         return Err(ApiError::bad_request("id must be numeric"));
     }
@@ -223,9 +231,9 @@ pub struct Source {
 
 /// A movie or one episode, as addressed by `/:type/:id?s=&e=`.
 pub struct TitleRef {
-    kind: MediaType,
-    id: u64,
-    episode: Option<(u32, u32)>,
+    pub(crate) kind: MediaType,
+    pub(crate) id: u64,
+    pub(crate) episode: Option<(u32, u32)>,
 }
 
 impl TitleRef {

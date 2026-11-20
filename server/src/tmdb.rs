@@ -14,6 +14,8 @@ const MAX_CACHE_ENTRIES: usize = 2000;
 
 pub const TTL_LIST: Duration = Duration::from_secs(30 * 60);
 pub const TTL_TITLE: Duration = Duration::from_secs(24 * 60 * 60);
+/// TV details / seasons for "Weiterschauen" and "Neue Folgen": new episodes show up within 6 h.
+pub const TTL_SHOW: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Thin TMDB v3 client with a small in-memory TTL cache.
 /// The bearer token is only ever placed in the Authorization header.
