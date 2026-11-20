@@ -1,0 +1,277 @@
+use std::{collections::HashMap, sync::Arc};
+
+use axum::{
+    Json, Router,
+    body::Bytes,
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::get,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::{
+    db::Db,
+    error::{ApiError, ApiResult},
+    model::{self, Details, Genre, Item, MediaType, Page, SeasonDetails},
+    tmdb::{TTL_LIST, TTL_TITLE, Tmdb},
+};
+
+#[derive(Debug, Deserialize)]
+pub struct Provider {
+    pub id: String,
+    pub name: String,
+    pub no_ads: bool,
+    pub movie: String,
+    pub tv: String,
+}
+
+pub struct AppState {
+    pub tmdb: Tmdb,
+    pub db: Db,
+    pub providers: Vec<Provider>,
+}
+
+type St = State<Arc<AppState>>;
+type Params = Query<HashMap<String, String>>;
+
+pub fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/status", get(status))
+        .route("/api/home", get(home))
+        .route("/api/list/{type}/{list}", get(list))
+        .route("/api/genres/{type}", get(genres))
+        .route("/api/search", get(search))
+        .route("/api/title/{type}/{id}", get(title))
+        .route("/api/title/{type}/{id}/season/{n}", get(season))
+        .route("/api/sources/{type}/{id}", get(sources))
+        .route("/api/watchlist", get(watchlist_list))
+        .route("/api/watchlist/{type}/{id}", axum::routing::put(watchlist_put).delete(watchlist_delete))
+        .route("/api", axum::routing::any(api_not_found))
+        .route("/api/{*rest}", axum::routing::any(api_not_found))
+        .with_state(state)
+}
+
+// ---------- validation ----------
+
+fn media_type(s: &str) -> ApiResult<MediaType> {
+    MediaType::parse(s).ok_or_else(|| ApiError::bad_request("type must be 'movie' or 'tv'"))
+}
+
+fn numeric_id(s: &str) -> ApiResult<u64> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ApiError::bad_request("id must be numeric"));
+    }
+    s.parse().map_err(|_| ApiError::bad_request("id must be numeric"))
+}
+
+fn small_num(params: &HashMap<String, String>, key: &str) -> ApiResult<Option<u32>> {
+    match params.get(key) {
+        None => Ok(None),
+        Some(v) => v
+            .parse::<u32>()
+            .map(Some)
+            .map_err(|_| ApiError::bad_request(format!("'{key}' must be a non-negative number"))),
+    }
+}
+
+fn page_param(params: &HashMap<String, String>) -> ApiResult<u32> {
+    let page = small_num(params, "page")?.unwrap_or(1);
+    if !(1..=500).contains(&page) {
+        return Err(ApiError::bad_request("'page' must be between 1 and 500"));
+    }
+    Ok(page)
+}
+
+// ---------- handlers ----------
+
+async fn api_not_found() -> ApiError {
+    ApiError::not_found("unknown API endpoint")
+}
+
+async fn status(State(st): St) -> Json<Value> {
+    Json(json!({ "tmdb_ok": st.tmdb.check().await, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+#[derive(Serialize)]
+struct Home {
+    trending: Vec<Item>,
+    popular_movies: Vec<Item>,
+    popular_tv: Vec<Item>,
+    top_rated_movies: Vec<Item>,
+    top_rated_tv: Vec<Item>,
+}
+
+async fn home(State(st): St) -> ApiResult<Json<Home>> {
+    let t = &st.tmdb;
+    let region = [("region", t.region.clone())];
+    let (trending, pm, ptv, tm, ttv) = tokio::join!(
+        t.get("/trending/all/day", &[], Some(TTL_LIST)),
+        t.get("/movie/popular", &region, Some(TTL_LIST)),
+        t.get("/tv/popular", &[], Some(TTL_LIST)),
+        t.get("/movie/top_rated", &region, Some(TTL_LIST)),
+        t.get("/tv/top_rated", &[], Some(TTL_LIST)),
+    );
+    Ok(Json(Home {
+        trending: model::items_from(&trending?, None),
+        popular_movies: model::items_from(&pm?, Some(MediaType::Movie)),
+        popular_tv: model::items_from(&ptv?, Some(MediaType::Tv)),
+        top_rated_movies: model::items_from(&tm?, Some(MediaType::Movie)),
+        top_rated_tv: model::items_from(&ttv?, Some(MediaType::Tv)),
+    }))
+}
+
+async fn list(State(st): St, Path((ty, list)): Path<(String, String)>, Query(q): Params) -> ApiResult<Json<Page>> {
+    let kind = media_type(&ty)?;
+    let page = page_param(&q)?;
+    let t = &st.tmdb;
+    let mut params = vec![("page", page.to_string())];
+    if kind == MediaType::Movie {
+        params.push(("region", t.region.clone()));
+    }
+
+    let path = if let Some(genre) = q.get("genre") {
+        numeric_id(genre).map_err(|_| ApiError::bad_request("'genre' must be numeric"))?;
+        params.push(("with_genres", genre.clone()));
+        params.push(("sort_by", "popularity.desc".into()));
+        format!("/discover/{}", kind.as_str())
+    } else {
+        match (kind, list.as_str()) {
+            (_, "popular" | "top_rated") => format!("/{}/{list}", kind.as_str()),
+            (_, "trending") => format!("/trending/{}/day", kind.as_str()),
+            (MediaType::Movie, "now_playing") | (MediaType::Tv, "on_the_air") => {
+                format!("/{}/{list}", kind.as_str())
+            }
+            _ => return Err(ApiError::bad_request("unknown list")),
+        }
+    };
+    let v = t.get(&path, &params, Some(TTL_LIST)).await?;
+    Ok(Json(model::page_from(&v, Some(kind))))
+}
+
+async fn genres(State(st): St, Path(ty): Path<String>) -> ApiResult<Json<Vec<Genre>>> {
+    let kind = media_type(&ty)?;
+    let v = st.tmdb.get(&format!("/genre/{}/list", kind.as_str()), &[], Some(TTL_LIST)).await?;
+    Ok(Json(model::genres_from(&v)))
+}
+
+async fn search(State(st): St, Query(q): Params) -> ApiResult<Json<Page>> {
+    let text = q.get("q").map(|s| s.trim()).unwrap_or_default();
+    if text.is_empty() {
+        return Err(ApiError::bad_request("'q' is required"));
+    }
+    let page = page_param(&q)?;
+    let params = [
+        ("query", text.to_owned()),
+        ("page", page.to_string()),
+        ("include_adult", "false".to_owned()),
+    ];
+    let v = st.tmdb.get("/search/multi", &params, Some(TTL_LIST)).await?;
+    Ok(Json(model::page_from(&v, None)))
+}
+
+async fn title(State(st): St, Path((ty, id)): Path<(String, String)>) -> ApiResult<Json<Details>> {
+    let kind = media_type(&ty)?;
+    let id = numeric_id(&id)?;
+    let params = [
+        ("append_to_response", "external_ids,videos,credits,recommendations".to_owned()),
+        ("include_video_language", "de,en".to_owned()),
+    ];
+    let v = st.tmdb.get(&format!("/{}/{id}", kind.as_str()), &params, Some(TTL_TITLE)).await?;
+    model::details_from(&v, kind)
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_gateway("TMDB returned incomplete data"))
+}
+
+async fn season(
+    State(st): St,
+    Path((ty, id, n)): Path<(String, String, String)>,
+) -> ApiResult<Json<SeasonDetails>> {
+    if media_type(&ty)? != MediaType::Tv {
+        return Err(ApiError::bad_request("seasons exist only for type 'tv'"));
+    }
+    let id = numeric_id(&id)?;
+    let n = numeric_id(&n)?;
+    let v = st.tmdb.get(&format!("/tv/{id}/season/{n}"), &[], Some(TTL_TITLE)).await?;
+    model::season_from(&v)
+        .map(Json)
+        .ok_or_else(|| ApiError::bad_gateway("TMDB returned incomplete data"))
+}
+
+#[derive(Serialize)]
+struct Source {
+    id: String,
+    name: String,
+    no_ads: bool,
+    url: String,
+}
+
+async fn sources(
+    State(st): St,
+    Path((ty, id)): Path<(String, String)>,
+    Query(q): Params,
+) -> ApiResult<Json<Vec<Source>>> {
+    let kind = media_type(&ty)?;
+    let id = numeric_id(&id)?;
+    let (s, e) = match kind {
+        MediaType::Movie => (None, None),
+        MediaType::Tv => {
+            let s = small_num(&q, "s")?.ok_or_else(|| ApiError::bad_request("'s' is required for tv"))?;
+            let e = small_num(&q, "e")?.ok_or_else(|| ApiError::bad_request("'e' is required for tv"))?;
+            (Some(s), Some(e))
+        }
+    };
+
+    let template = |p: &Provider| -> String {
+        match kind {
+            MediaType::Movie => p.movie.clone(),
+            MediaType::Tv => p.tv.clone(),
+        }
+    };
+
+    let imdb = if st.providers.iter().any(|p| template(p).contains("{imdb}")) {
+        let v = st.tmdb.get(&format!("/{}/{id}/external_ids", kind.as_str()), &[], None).await?;
+        v.get("imdb_id").and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned)
+    } else {
+        None
+    };
+
+    let out = st
+        .providers
+        .iter()
+        .filter_map(|p| {
+            let mut url = template(p).replace("{tmdb}", &id.to_string());
+            if url.contains("{imdb}") {
+                url = url.replace("{imdb}", imdb.as_deref()?);
+            }
+            if let (Some(s), Some(e)) = (s, e) {
+                url = url.replace("{s}", &s.to_string()).replace("{e}", &e.to_string());
+            }
+            Some(Source { id: p.id.clone(), name: p.name.clone(), no_ads: p.no_ads, url })
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+async fn watchlist_list(State(st): St) -> ApiResult<Json<Vec<Item>>> {
+    Ok(Json(st.db.list()?))
+}
+
+async fn watchlist_put(State(st): St, Path((ty, id)): Path<(String, String)>, body: Bytes) -> ApiResult<StatusCode> {
+    let kind = media_type(&ty)?;
+    let id = numeric_id(&id)?;
+    let mut item: Item =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("invalid Item body: {e}")))?;
+    // The path is authoritative for the key.
+    item.kind = kind;
+    item.id = id;
+    st.db.put(&item)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn watchlist_delete(State(st): St, Path((ty, id)): Path<(String, String)>) -> ApiResult<StatusCode> {
+    let kind = media_type(&ty)?;
+    let id = numeric_id(&id)?;
+    st.db.delete(kind, id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
