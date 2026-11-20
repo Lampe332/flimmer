@@ -11,8 +11,11 @@ use std::{
     fs::File,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Instant,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -71,6 +74,11 @@ fn find_port() -> Result<u16, String> {
     Ok(flimmer::DEFAULT_PORT)
 }
 
+/// Set once the main window started closing; a second click on the X closes at once.
+static CLOSING: AtomicBool = AtomicBool::new(false);
+/// Time the page gets to send its last progress save to the in-process server before the window goes.
+const SAVE_GRACE: Duration = Duration::from_millis(400);
+
 fn fail(msg: &str) -> ! {
     // SAFETY: plain Win32 call with valid, NUL-terminated strings owned by this frame.
     unsafe {
@@ -103,6 +111,7 @@ fn main() {
             }
             let sniffer =
                 sniffer::WebviewSniffer::new(app.handle().clone(), webview_data.join("scan"), ext, log.clone());
+            sniffer.warm();
             let opts = flimmer::Options {
                 root: root.clone(),
                 port,
@@ -132,9 +141,27 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // hidden scan windows must not keep the app alive
-            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
-                window.app_handle().exit(0);
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                // WebView2 fires no pagehide when the window closes, so the player would lose up to 10 s of
+                // progress: ask the page to save first, then close for real.
+                WindowEvent::CloseRequested { api, .. } if !CLOSING.swap(true, Ordering::SeqCst) => {
+                    api.prevent_close();
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        let _ = main.eval("window.dispatchEvent(new Event('flimmer:beforeclose'))");
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(SAVE_GRACE).await;
+                            let _ = main.destroy();
+                        });
+                    } else {
+                        let _ = window.destroy();
+                    }
+                }
+                // hidden scan windows must not keep the app alive
+                WindowEvent::Destroyed => window.app_handle().exit(0),
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

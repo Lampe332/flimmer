@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     path::Path,
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
@@ -78,7 +79,18 @@ impl Db {
                  data       TEXT    NOT NULL,
                  watched_at INTEGER NOT NULL
              );
-             CREATE INDEX IF NOT EXISTS history_key ON history (type, id, season, episode, watched_at);",
+             CREATE INDEX IF NOT EXISTS history_key ON history (type, id, season, episode, watched_at);
+             CREATE TABLE IF NOT EXISTS provider_health (
+                 key         TEXT    PRIMARY KEY,
+                 ok          INTEGER NOT NULL,
+                 fail        INTEGER NOT NULL,
+                 fail_streak INTEGER NOT NULL,
+                 avg_ms      INTEGER,
+                 last_ok     INTEGER,
+                 last_try    INTEGER NOT NULL,
+                 last_error  INTEGER NOT NULL,
+                 last_reason TEXT
+             );",
         )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -347,6 +359,85 @@ impl Db {
         self.lock().execute("DELETE FROM history", []).map_err(db_err)?;
         Ok(())
     }
+
+    // ---------- provider health (scan order and skipping) ----------
+
+    /// All rows whose key starts with `prefix` (`"movie:"` / `"tv:"`), keyed by the rest (provider id).
+    pub fn health_all(&self, prefix: &str) -> ApiResult<HashMap<String, Health>> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT key, fail_streak, avg_ms, last_try, last_error, last_reason
+                 FROM provider_health WHERE substr(key, 1, ?1) = ?2",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map(params![prefix.len() as i64, prefix], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    Health {
+                        fail_streak: r.get(1)?,
+                        avg_ms: r.get(2)?,
+                        last_try: r.get(3)?,
+                        last_error: r.get(4)?,
+                        last_reason: r.get(5)?,
+                    },
+                ))
+            })
+            .map_err(db_err)?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (key, health) = row.map_err(db_err)?;
+            out.insert(key[prefix.len()..].to_string(), health);
+        }
+        Ok(out)
+    }
+
+    /// Adds the outcomes of one scan, keyed `"<movie|tv>:<provider id>"`.
+    pub fn health_record(&self, outcomes: &[(String, Outcome)]) -> ApiResult<()> {
+        let now = now_ms();
+        let mut conn = self.lock();
+        let tx = conn.transaction().map_err(db_err)?;
+        for (key, outcome) in outcomes {
+            match outcome {
+                Ok(ms) => tx.execute(
+                    "INSERT INTO provider_health (key, ok, fail, fail_streak, avg_ms, last_ok, last_try, last_error)
+                     VALUES (?1, 1, 0, 0, ?2, ?3, ?3, 0)
+                     ON CONFLICT(key) DO UPDATE SET
+                         ok = ok + 1, fail_streak = 0, avg_ms = (COALESCE(avg_ms, ?2) * 2 + ?2) / 3,
+                         last_ok = ?3, last_try = ?3, last_error = 0, last_reason = NULL",
+                    params![key, *ms as i64, now],
+                ),
+                Err((is_error, reason)) => tx.execute(
+                    "INSERT INTO provider_health (key, ok, fail, fail_streak, last_try, last_error, last_reason)
+                     VALUES (?1, 0, 1, 1, ?2, ?3, ?4)
+                     ON CONFLICT(key) DO UPDATE SET
+                         fail = fail + 1, fail_streak = fail_streak + 1, last_try = ?2, last_error = ?3, last_reason = ?4",
+                    params![key, now, is_error, reason],
+                ),
+            }
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+}
+
+/// One scan outcome of a provider: `Ok(ms)` = stream found after `ms`, `Err((is_error, reason))` = none
+/// (`is_error`: the page was unreachable, not just without a stream).
+pub type Outcome = Result<u64, (bool, Option<String>)>;
+
+/// What the scans so far say about one provider (per media type). The table also counts `ok` / `fail`
+/// and keeps `last_ok` for looking at it by hand.
+#[derive(Debug, Clone, Default)]
+pub struct Health {
+    /// Scans without a stream since the last one with a stream.
+    pub fail_streak: u32,
+    /// Smoothed time until the stream was captured.
+    pub avg_ms: Option<i64>,
+    pub last_try: i64,
+    /// The last failure was an unreachable page (`error`), not a page without stream (`no_stream`).
+    pub last_error: bool,
+    pub last_reason: Option<String>,
 }
 
 /// A movie (`season = episode = 0`) or one episode.
@@ -387,4 +478,37 @@ fn encode(meta: &WatchMeta) -> ApiResult<String> {
 fn db_err(e: rusqlite::Error) -> ApiError {
     eprintln!("database error: {e}");
     ApiError::internal("database error")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_counts_streaks_per_media_type() {
+        let db = Db::open(Path::new(":memory:")).expect("in-memory db");
+        let rec = |key: &str, outcome: Outcome| db.health_record(&[(key.to_string(), outcome)]).unwrap();
+        rec("movie:a", Ok(900));
+        rec("movie:a", Ok(300));
+        rec("movie:b", Err((false, None)));
+        db.health_record(&[
+            ("movie:b".to_string(), Err((true, Some("provider host not found".to_string())))),
+            ("tv:a".to_string(), Err((false, Some("hint".to_string())))),
+        ])
+        .unwrap();
+
+        let movie = db.health_all("movie:").unwrap();
+        assert_eq!(movie.len(), 2);
+        assert_eq!((movie["a"].fail_streak, movie["a"].avg_ms), (0, Some(700)));
+        assert_eq!((movie["b"].fail_streak, movie["b"].last_error), (2, true));
+        assert_eq!(movie["b"].last_reason.as_deref(), Some("provider host not found"));
+
+        // a stream ends the streak and clears the reason
+        rec("movie:b", Ok(1200));
+        let b = &db.health_all("movie:").unwrap()["b"];
+        assert_eq!((b.fail_streak, b.avg_ms, b.last_error, b.last_reason.as_deref()), (0, Some(1200), false, None));
+
+        let tv = db.health_all("tv:").unwrap();
+        assert_eq!((tv.len(), tv["a"].fail_streak), (1, 1));
+    }
 }

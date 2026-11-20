@@ -111,6 +111,12 @@ interface BufferState { variant: number; from_seconds: number; ahead_seconds: nu
 A stream whose upstream starts failing (403/410, expired token) → `/api/stream/...` returns `410 { "error": "expired" }`; the UI then re-scans that provider with `force=1`.
 Cache housekeeping: on start, delete `data/cache/*` older than 24 h.
 
+Scan order and skipping (no new fields; `results` always stays in `providers.json` order, numbers in `docs/scan-speed.md`):
+- Up to 10 provider pages load at once, started 0.3 s apart. Per media type the server remembers each provider's outcomes (SQLite table `provider_health`). Queue order: providers with a stream in their last scan (fastest first), then never scanned ones, then ones that failed last time.
+- A provider that had a stream in its last scan and shows none now is tried a second time before its result is reported (it stays `running` meanwhile).
+- A provider without a stream in 3 full scans in a row is skipped: its result appears immediately with its last status (`no_stream` or `error`) and `error: "skipped: … in the last N scans (tried again once a day)"`. 24 h after its last try it is scanned again, at the end of the queue. `&force=1&provider=<provider_id>` always scans that provider. Failures only count in a scan in which at least one other provider had a stream.
+- A scan window gives up after 15 s when the page made no media request at all, otherwise 6 s after the last one, at most after 25 s.
+
 ## Phase 3: watch progress, Weiterschauen, Verlauf, Neue Folgen
 
 A movie is addressed as `/:type/:id`, an episode as `/tv/:id?s=&e=` (`s`/`e` required for tv, like `/api/sources`). Positions are seconds. Timestamps are ISO 8601 UTC (`2026-11-20T03:46:31Z`).
@@ -164,3 +170,7 @@ interface NewEpisode {
 | GET | `/api/new-episodes` | `NewEpisode[]`, newest air date first. Series = tv titles with progress (furthest episode seen) plus tv titles on the watchlist (max 60). New = episodes of the season of TMDB `last_episode_to_air` that aired in the last 30 days and come after the furthest episode seen. TMDB data cached 6 h |
 
 Everything not under `/api/` serves the built web UI (`web/dist`), unknown paths fall back to `index.html` (SPA routing).
+
+## Languages (lang parameter)
+
+Every `/api` call accepts `?lang=xx-YY`; details in [i18n.md](i18n.md).

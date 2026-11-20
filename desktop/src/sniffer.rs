@@ -8,7 +8,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         Arc,
@@ -37,10 +37,28 @@ const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreen
     --disable-renderer-backgrounding --disable-backgrounding-occluded-windows";
 const SIZE: (f64, f64) = (1280.0, 720.0);
 /// Real clicks on the player centre for pages that wait for one (seconds after load start).
-const CLICK_AT: [u64; 3] = [7, 12, 18];
-const GIVE_UP: Duration = Duration::from_secs(25);
+const CLICK_AT: [u64; 3] = [7, 10, 13];
+/// Pause between two page starts: of pages that begin to load in the same instant, more end up
+/// without a stream (docs/scan-speed.md).
+const START_GAP: Duration = Duration::from_millis(300);
+/// A page that showed no media request at all by now has no stream for us.
+const GIVE_UP_QUIET: Duration = Duration::from_secs(15);
+/// A page that did show one (a playlist the server turned down, DASH, a small mp4) gets this long
+/// after the latest one for a usable stream to follow ...
+const CANDIDATE_GRACE: Duration = Duration::from_secs(6);
+/// ... but never longer than this in total.
+const GIVE_UP_HARD: Duration = Duration::from_secs(25);
 
-/// Runs in every frame: start paused videos once the page had ~6 s to do it itself.
+/// Time after which a page is given up; `last_candidate_ms` = when it last reported a candidate (0 = never).
+fn give_up_after(last_candidate_ms: u64) -> Duration {
+    let wait = match last_candidate_ms {
+        0 => GIVE_UP_QUIET,
+        ms => GIVE_UP_QUIET.max(Duration::from_millis(ms) + CANDIDATE_GRACE),
+    };
+    wait.min(GIVE_UP_HARD)
+}
+
+/// Runs in every frame: start paused videos once the page had ~2.5 s to do it itself.
 const PLAY_SCRIPT: &str = r#"(() => {
   let n = 0;
   const tick = () => {
@@ -49,9 +67,9 @@ const PLAY_SCRIPT: &str = r#"(() => {
         if (v.paused) { v.muted = true; const p = v.play(); if (p) p.catch(() => {}); }
       }
     } catch {}
-    if (++n < 7) setTimeout(tick, 2500);
+    if (++n < 10) setTimeout(tick, 2000);
   };
-  setTimeout(tick, 6000);
+  setTimeout(tick, 2500);
 })();"#;
 
 pub struct WebviewSniffer {
@@ -62,12 +80,48 @@ pub struct WebviewSniffer {
     log: Log,
     seq: AtomicU64,
     popups: Arc<AtomicU64>,
+    /// Held while a page is being started, so that no two start within `START_GAP`.
+    start: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl WebviewSniffer {
     pub fn new(app: AppHandle, data_dir: PathBuf, ext_dir: Option<PathBuf>, log: Log) -> Self {
-        Self { app, data_dir, ext_dir, log, seq: AtomicU64::new(1), popups: Arc::new(AtomicU64::new(0)) }
+        Self {
+            app,
+            data_dir,
+            ext_dir,
+            log,
+            seq: AtomicU64::new(1),
+            popups: Arc::new(AtomicU64::new(0)),
+            start: Arc::default(),
+        }
     }
+
+    /// Opens an empty hidden page that stays for the life of the app. It keeps the scan browser
+    /// process and its ad blocker loaded, so the first pages of a scan do not have to wait for both.
+    pub fn warm(&self) {
+        match scan_window(&self.app, "scan-warm", &self.data_dir, self.ext_dir.as_ref()) {
+            Ok(_) => self.log.line("scan browser warm"),
+            Err(e) => self.log.line(format_args!("scan browser not warmed: {e}")),
+        }
+    }
+}
+
+/// A hidden window in the scan profile, showing `about:blank`.
+fn scan_window(app: &AppHandle, label: &str, data_dir: &Path, ext_dir: Option<&PathBuf>) -> tauri::Result<WebviewWindow> {
+    let blank = WebviewUrl::External("about:blank".parse().expect("static URL"));
+    let mut b = WebviewWindowBuilder::new(app, label, blank)
+        .title("Flimmer Scan")
+        .inner_size(SIZE.0, SIZE.1)
+        .visible(false)
+        .focused(false)
+        .skip_taskbar(true)
+        .data_directory(data_dir.to_path_buf())
+        .additional_browser_args(BROWSER_ARGS);
+    if let Some(ext) = ext_dir {
+        b = b.browser_extensions_enabled(true).extensions_path(ext);
+    }
+    b.build()
 }
 
 impl Sniffer for WebviewSniffer {
@@ -79,6 +133,7 @@ impl Sniffer for WebviewSniffer {
             log: self.log.clone(),
             n: self.seq.fetch_add(1, Ordering::Relaxed),
             popups: self.popups.clone(),
+            start: self.start.clone(),
         };
         Box::pin(job.run(url, out))
     }
@@ -91,6 +146,7 @@ struct Job {
     log: Log,
     n: u64,
     popups: Arc<AtomicU64>,
+    start: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Closes the window however the sniff ends (also when the task is dropped).
@@ -113,24 +169,18 @@ impl Job {
             return Err("provider URL has no host".into());
         }
         let label = format!("scan-{}", self.n);
-        let blank = WebviewUrl::External("about:blank".parse().expect("static URL"));
-        let mut b = WebviewWindowBuilder::new(&self.app, &label, blank)
-            .title("Flimmer Scan")
-            .inner_size(SIZE.0, SIZE.1)
-            .visible(false)
-            .focused(false)
-            .skip_taskbar(true)
-            .data_directory(self.data_dir.clone())
-            .additional_browser_args(BROWSER_ARGS);
-        if let Some(ext) = &self.ext_dir {
-            b = b.browser_extensions_enabled(true).extensions_path(ext);
-        }
-        let win = b.build().map_err(|e| format!("scan window: {e}"))?;
+        let starting = self.start.clone().lock_owned().await;
+        let win = scan_window(&self.app, &label, &self.data_dir, self.ext_dir.as_ref())
+            .map_err(|e| format!("scan window: {e}"))?;
         let win = CloseOnDrop(win);
 
         let (ready_tx, ready_rx) = oneshot::channel();
         let (fail_tx, mut fail_rx) = oneshot::channel();
+        let t0 = tokio::time::Instant::now();
+        let last_candidate = Arc::new(AtomicU64::new(0));
         let page = Page {
+            t0,
+            last_candidate: last_candidate.clone(),
             n: self.n,
             url: url.clone(),
             out: out.clone(),
@@ -150,12 +200,14 @@ impl Job {
             .map_err(|e| format!("scan window: {e}"))?;
         ready_rx.await.map_err(|_| "scan window closed early".to_string())??;
         self.log.line(format_args!("scan-{} open {host}", self.n));
+        tokio::time::sleep(START_GAP).await;
+        drop(starting);
 
-        let t0 = tokio::time::Instant::now();
         let (mut next_click, mut page_alive) = (0, true);
         loop {
-            let click = CLICK_AT.get(next_click);
-            let at = t0 + click.map_or(GIVE_UP, |s| Duration::from_secs(*s));
+            let give_up = t0 + give_up_after(last_candidate.load(Ordering::Relaxed));
+            let click = CLICK_AT.get(next_click).map(|s| t0 + Duration::from_secs(*s)).filter(|c| *c < give_up);
+            let at = click.unwrap_or(give_up);
             tokio::select! {
                 _ = out.closed() => break,
                 failed = &mut fail_rx, if page_alive => match failed {
@@ -166,11 +218,13 @@ impl Job {
                     Err(_) => page_alive = false,
                 },
                 _ = tokio::time::sleep_until(at) => {
-                    if click.is_none() {
+                    if click.is_some() {
+                        next_click += 1;
+                        let _ = win.0.with_webview(|pw| click_centre(&pw.controller()));
+                    } else if at >= t0 + give_up_after(last_candidate.load(Ordering::Relaxed)) {
                         break;
                     }
-                    next_click += 1;
-                    let _ = win.0.with_webview(|pw| click_centre(&pw.controller()));
+                    // else: a candidate came in while waiting, the page gets its grace time
                 }
             }
         }
@@ -186,6 +240,9 @@ impl Job {
 
 /// State shared by the event handlers of one page (UI thread only).
 struct Page {
+    t0: tokio::time::Instant,
+    /// Milliseconds after `t0` at which the latest candidate was reported (0 = none yet).
+    last_candidate: Arc<AtomicU64>,
     n: u64,
     url: String,
     out: UnboundedSender<Candidate>,
@@ -209,6 +266,9 @@ fn pw(f: impl FnOnce(*mut PWSTR) -> windows::core::Result<()>) -> String {
 fn cut(s: &str) -> String {
     s.chars().take(160).collect()
 }
+
+/// `WebResourceRequested` filters covering every URL `kind_by_url` accepts.
+const MEDIA_URL_FILTERS: [&str; 3] = ["*.m3u*", "*.mp4*", "*.mpd*"];
 
 fn kind_by_url(u: &str) -> Option<CandidateKind> {
     let lower = u.to_ascii_lowercase();
@@ -268,6 +328,7 @@ impl Page {
         if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("user-agent")) {
             headers.push(("User-Agent".into(), self.ua.borrow().clone()));
         }
+        self.last_candidate.store((self.t0.elapsed().as_millis() as u64).max(1), Ordering::Relaxed);
         self.log.line(format_args!("scan-{} candidate {kind:?} {}", self.n, host_of(&uri)));
         let _ = self.out.send(Candidate { url: uri, kind, headers });
     }
@@ -292,11 +353,18 @@ fn hook(controller: ICoreWebView2Controller, page: Page) -> windows::core::Resul
         let mut token = Default::default();
 
         // --- requests of all frames and workers ---------------------------------------------
-        core.cast::<ICoreWebView2_22>()?.AddWebResourceRequestedFilterWithRequestSourceKinds(
-            &HSTRING::from("*"),
-            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
-            COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
-        )?;
+        // Only URLs that can be media (see `kind_by_url`): a request that matches a filter waits for
+        // this UI thread, and with "*" every request of every open page did, also while the thread
+        // was busy opening the next scan windows. With many pages at once, fewer of them then got as
+        // far as their stream (docs/scan-speed.md).
+        let core22 = core.cast::<ICoreWebView2_22>()?;
+        for pattern in MEDIA_URL_FILTERS {
+            core22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                &HSTRING::from(pattern),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+            )?;
+        }
         let p = page.clone();
         core.add_WebResourceRequested(
             &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
@@ -458,5 +526,23 @@ fn click_centre(controller: &ICoreWebView2Controller) {
                 &CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(()))),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn give_up_times() {
+        // nothing seen: short wait
+        assert_eq!(give_up_after(0), GIVE_UP_QUIET);
+        // an early candidate does not shorten it
+        assert_eq!(give_up_after(1_000), GIVE_UP_QUIET);
+        // a late one extends it by the grace time
+        assert_eq!(give_up_after(12_000), Duration::from_secs(18));
+        assert_eq!(give_up_after(9_000), GIVE_UP_QUIET);
+        // never beyond the hard limit
+        assert_eq!(give_up_after(23_000), GIVE_UP_HARD);
     }
 }
