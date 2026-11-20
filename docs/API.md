@@ -174,3 +174,101 @@ Everything not under `/api/` serves the built web UI (`web/dist`), unknown paths
 ## Languages (lang parameter)
 
 Every `/api` call accepts `?lang=xx-YY`; details in [i18n.md](i18n.md).
+
+## Phase 5: Torrents (search, streaming, download) behind the VPN
+
+Search sources follow [melqtx/tork](https://github.com/melqtx/tork) (MIT), plus a Torrentio lookup by IMDb id. Engine: embedded `librqbit`.
+
+**Network rule.** Torrent traffic exists only inside a WireGuard tunnel that Flimmer opens itself (userspace: `boringtun` + `smoltcp`, no adapter, no admin rights, nothing else on the PC is routed through it). The engine's only ways out are a loopback SOCKS5 server that dials through the tunnel (peers) and an in-process tracker shim; the real tracker announces (UDP + HTTP) and their DNS lookups are made by Flimmer through the tunnel. DHT, local peer discovery, UPnP and incoming connections are off. Tunnel down = SOCKS refuses = no torrent traffic (kill-switch, there is no fallback route). The tunnel opens when the first torrent becomes active (not paused, not completed) and closes 5 s after the last one stops. A finished download is paused in the engine (no seeding); upload while downloading is limited (`upload_kbps`). Searching uses the normal network (plain HTTPS to the index sites).
+The system must let Flimmer reach the VPN server: while the Proton VPN app is connected with its kill switch, the tunnel cannot handshake (`Vpn.error`).
+
+```ts
+interface Release {                    // parsed from the release name
+  title: string; year: number | null;
+  season: number | null; episode: number | null; pack: boolean;   // pack = whole season
+  height: 480 | 576 | 720 | 1080 | 2160 | null;
+  source: "Remux" | "BluRay" | "WEB-DL" | "WEBRip" | "HDTV" | "DVD" | "CAM" | null;
+  codec: "HEVC" | "H.264" | "AV1" | "XviD" | null;
+  hdr: "DV" | "HDR10+" | "HDR" | null;
+  audio: "Atmos" | "TrueHD" | "DTS-HD" | "DTS" | "EAC3" | "AC3" | "AAC" | "FLAC" | "Opus" | null;
+  languages: string[];                 // "de", "en", "multi", "fr" …; [] = not stated (usually English). "German DL" → ["de","en"]
+}
+
+interface TorrentResult {
+  infohash: string;                    // 40 hex, lowercase
+  name: string; size: number;          // bytes
+  seeders: number;                     // summed over all sources listing this infohash
+  seeders_max: number;                 // highest value of a single source
+  leechers: number;
+  sources: string[];                   // source ids
+  trackers: string[];
+  file_index: number | null;           // file of the requested movie/episode inside the torrent (season packs); pass it to /start
+  exact: boolean;                      // found by IMDb id
+  release: Release;
+  below_min: boolean;                  // misses Settings.filter.min_height
+  score: number;                       // sort key; results are sorted best first
+  magnet: string;
+}
+
+interface SourceStatus { id: string; status: "ok" | "blocked" | "error" | "skipped"; count: number; ms: number; error: string | null }
+interface TorrentSearch { results: TorrentResult[]; sources: SourceStatus[] }   // max 120 results, cached 5 min
+
+interface Vpn {
+  state: "down" | "connecting" | "up" | "blocked";   // blocked = kill-switch engaged by POST /api/vpn/kill
+  since: string | null; public_ip: string | null; country: string | null;   // address seen through the tunnel (ipinfo.io asked through it)
+  handshake_age: number | null;        // seconds since the last WireGuard handshake
+  rx_bytes: number; tx_bytes: number; error: string | null; config_found: boolean;
+}
+
+interface TorrentMedia { type: MediaType; id?: number; title: string; year?: number; season?: number; episode?: number }
+
+interface Torrent {
+  id: string;                          // infohash
+  name: string; mode: "stream" | "download"; media: TorrentMedia | null;
+  state: "metadata" | "starting" | "checking" | "downloading" | "paused" | "completed" | "error" | "vpn_blocked";
+  progress: number;                    // 0..1 of the selected files
+  downloaded: number; total: number; down_speed: number; up_speed: number;   // bytes, bytes/s
+  peers: number; peers_known: number; eta_seconds: number | null;
+  folder: string; error: string | null; added_at: string;
+  files: { index: number; name: string; size: number; path: string; selected: boolean; downloaded: number; video: boolean }[];  // [] until the metadata is there
+}
+
+interface PlayInfo {
+  file: number; name: string; size: number;
+  mode: "direct" | "transcode";
+  url: string;                         // /api/torrents/:id/play?file=N
+  duration: number | null;             // seconds
+  video_codec: string | null; width: number | null; height: number | null; copy_video: boolean;
+  audio: { index: number; codec: string; channels: number; lang: string | null; title: string | null; default: boolean }[];
+}
+
+interface TorrentSettings { vpn_config: string; movies_dir: string; series_dir: string; upload_kbps: number }
+```
+
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/api/torrents/search?q=<text>` | `TorrentSearch`, free search (Torrentio/EZTV are `skipped`: they need an IMDb id) |
+| GET | `/api/torrents/:type/:id?s=&e=` | `TorrentSearch` for a movie / episode: IMDb lookups (Torrentio, YTS, EZTV) plus text search with the original and the localized title; text hits must match title, year (±1) or season/episode (season packs included) |
+| POST | `/api/torrents/start` | body `{ magnet?: string, infohash?: string, trackers?: string[], name?: string, mode?: "stream" \| "download", file_index?: number, files?: number[], media?: TorrentMedia }` → `202` `Torrent`. Opens the tunnel, resolves the metadata, picks the files (`files`/`file_index`, else the episode in `media`, else all videos for a tv `media` without episode, else the largest video) and starts. Starting a known torrent again resumes it and applies `files`. Stream and download both save to disk; "stream" only means the UI plays it right away |
+| GET | `/api/torrents` | `{ vpn: Vpn, torrents: Torrent[] }`, newest first (poll ~1–2 s while something is active) |
+| GET | `/api/torrents/:id` | `Torrent` |
+| POST | `/api/torrents/:id/pause` | `204` |
+| POST | `/api/torrents/:id/resume` | `204` |
+| PUT | `/api/torrents/:id/files` | body `{ files: number[] }` → `204`; changes the selection (season packs) |
+| DELETE | `/api/torrents/:id?files=1` | `204`; with `files=1` also deletes the torrent's files (and its folders when empty) |
+| GET | `/api/torrents/:id/playinfo?file=<i>` | `PlayInfo` (ffprobe; waits until the file's start is downloaded, `504` after 90 s). `file` defaults to the first selected video |
+| GET | `/api/torrents/:id/play?file=<i>&t=<seconds>&audio=<i>&video=h264` | the playable stream, see below |
+| GET | `/api/torrents/:id/file/:index` | raw file with HTTP range support |
+| GET | `/api/torrents/settings` | `TorrentSettings` (defaults: `<root>/data/vpn/proton.conf`, `D:\Flimmer Downloads\Filme`, `D:\Flimmer Downloads\Serien`, 30) |
+| PUT | `/api/torrents/settings` | body `TorrentSettings` → `204` |
+| GET | `/api/vpn` | `Vpn` |
+| POST | `/api/vpn/kill` | `204`; kill-switch: tunnel down and held down, all torrents show `vpn_blocked` and have no traffic |
+| POST | `/api/vpn/release` | `204`; the tunnel comes back when a torrent is active |
+
+**Folders.** Movie: `<movies_dir>\<Titel (Jahr)>\`, series: `<series_dir>\<Titel>\Staffel NN\`, without `media`: `<movies_dir>\<torrent name>\`; inside, the torrent's own file paths.
+
+**Playing.** `PlayInfo.mode` tells the player what `/play` returns:
+- `direct` (MP4/WebM with H.264/HEVC/VP9/AV1 and AAC/MP3/Opus): the file itself with range support. Use it as `<video src>`; seeking is native and the engine prioritises the requested position. Works while downloading and offline afterwards.
+- `transcode` (MKV, AC3/DTS/EAC3/TrueHD audio, old video codecs): ffmpeg (`tools/ffmpeg/bin`, gyan.dev build, not in git) writes fragmented MP4 on the fly: video copied when `copy_video` (else H.264), audio → AAC stereo. Also a plain `<video src>`, but the stream is not seekable: to seek, load `/play?...&t=<seconds>` and add `t` to `currentTime`; use `PlayInfo.duration` for the timeline. `audio=<i>` picks the audio track (German/English in "DL" releases), `video=h264` forces a video re-encode if the copied codec does not play.
+
+**Ranking.** `score` = language (wanted `audio_lang` found ≫ `multi`) + quality by `sort` (`quality`: height and source, `bitrate`: size, `speed`: seeders) + seeders (log scale) − penalties (no seeders, below `min_height`, CAM).

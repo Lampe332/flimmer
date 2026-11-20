@@ -18,6 +18,7 @@ pub enum Table {
     Scans,
     Streams,
     Settings,
+    Torrents,
 }
 
 impl Table {
@@ -26,6 +27,7 @@ impl Table {
             Self::Scans => "scans",
             Self::Streams => "streams",
             Self::Settings => "settings",
+            Self::Torrents => "torrents",
         }
     }
 }
@@ -54,6 +56,7 @@ impl Db {
              CREATE TABLE IF NOT EXISTS scans    (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS streams  (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS torrents (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS progress (
                  type       TEXT    NOT NULL,
                  id         INTEGER NOT NULL,
@@ -158,6 +161,13 @@ impl Db {
         let sql = format!("DELETE FROM {} WHERE key = ?1", table.name());
         self.lock().execute(&sql, params![key]).map_err(db_err)?;
         Ok(())
+    }
+
+    pub fn blob_all(&self, table: Table) -> ApiResult<Vec<String>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(&format!("SELECT data FROM {} ORDER BY rowid", table.name())).map_err(db_err)?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(db_err)?;
+        rows.collect::<Result<_, _>>().map_err(db_err)
     }
 
     /// Drops rows not written since `before_ms`.

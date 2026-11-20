@@ -5,20 +5,21 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
     db::Db,
-    progress,
+    play, progress,
     scan::{self, Scans},
     sniff::Sniffer,
     stream::{self, Streams},
     error::{ApiError, ApiResult},
     model::{self, Details, Genre, Item, MediaType, Page, SeasonDetails},
     tmdb::{TTL_LIST, TTL_TITLE, Tmdb},
+    torrent, tracker, tsearch, vpn,
 };
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +39,7 @@ pub struct AppState {
     pub sniffer: Option<Arc<dyn Sniffer>>,
     pub scans: Scans,
     pub streams: Streams,
+    pub torrents: Arc<crate::torrent::Torrents>,
 }
 
 pub(crate) type St = State<Arc<AppState>>;
@@ -70,6 +72,23 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/history", get(progress::history).delete(progress::history_clear))
         .route("/api/history/{entry}", axum::routing::delete(progress::history_delete))
         .route("/api/new-episodes", get(progress::new_episodes))
+        .route("/api/vpn", get(vpn::status))
+        .route("/api/vpn/kill", post(vpn::kill))
+        .route("/api/vpn/release", post(vpn::release))
+        .route("/api/torrents", get(torrent::list))
+        .route("/api/torrents/search", get(tsearch::free))
+        .route("/api/torrents/start", post(torrent::start))
+        .route("/api/torrents/settings", get(torrent::settings_get).put(torrent::settings_put))
+        .route("/api/torrents/announce", get(tracker::shim))
+        .route("/api/torrents/{id}", get(torrent::get).delete(torrent::delete))
+        .route("/api/torrents/{id}/pause", post(torrent::pause))
+        .route("/api/torrents/{id}/resume", post(torrent::resume))
+        .route("/api/torrents/{id}/files", axum::routing::put(torrent::put_files))
+        .route("/api/torrents/{id}/play", get(play::play))
+        .route("/api/torrents/{id}/playinfo", get(play::playinfo))
+        .route("/api/torrents/{id}/file/{index}", get(play::file))
+        // `{id}` is "movie" | "tv" here: torrents of one title.
+        .route("/api/torrents/{id}/{tmdb}", get(tsearch::by_title))
         .route("/api", axum::routing::any(api_not_found))
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         .with_state(state)
