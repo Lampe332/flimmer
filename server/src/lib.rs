@@ -6,11 +6,18 @@ mod db;
 mod error;
 mod hls;
 mod model;
+mod play;
 mod progress;
+mod release;
 mod scan;
 pub mod sniff;
 mod stream;
 mod tmdb;
+mod torrent;
+mod tracker;
+mod tsearch;
+mod vpn;
+mod wg;
 
 use std::{
     future::Future,
@@ -109,6 +116,8 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         let _ = db.blob_prune(table, db::now_ms() - DAY_MS);
     }
 
+    let torrents = torrent::Torrents::new(opts.root.clone(), opts.port, &torrent::initial_settings(&db, &opts.root)).await?;
+
     let state = Arc::new(api::AppState {
         tmdb: tmdb::Tmdb::new(cfg.tmdb_read_token, cfg.language, cfg.region),
         db,
@@ -116,7 +125,9 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         sniffer: opts.sniffer,
         scans: scan::Scans::default(),
         streams,
+        torrents,
     });
+    torrent::spawn_manager(state.clone());
 
     let cors = CorsLayer::new()
         .allow_origin(HeaderValue::from_static(DEV_ORIGIN))

@@ -14,11 +14,20 @@ path = "src/main.rs"
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util", "process"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "socks"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 url = "2"
+librqbit = { version = "9", default-features = false, features = ["rust-tls"] }
+boringtun = { version = "0.7", default-features = false }
+smoltcp = { version = "0.14", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-udp", "socket-dns", "async"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+base64 = "0.23.1"
+regex = "1.13.2"
+rand = "0.10.4"
+bytes = "1.12.2"
+anyhow = "1.0.104"
