@@ -504,7 +504,7 @@ async fn collect(st: &AppState, key: String, s: Search) -> Arc<Found> {
     found
 }
 
-/// Filters (`lang`, `res`, `source` …), facets and ranking (`mode=fast|quality`) of one request.
+/// Filters (`language`, `res`, `source` …; not `lang`: that is the TMDB language of every request), facets and ranking (`mode=fast|quality`) of one request.
 fn respond(st: &AppState, found: &Found, q: &HashMap<String, String>) -> ApiResult<Json<Value>> {
     let query = release::Query::from_params(q).map_err(ApiError::bad_request)?;
     let mode = match q.get("mode").map(String::as_str) {

@@ -273,3 +273,93 @@ interface TorrentSettings { vpn_config: string; movies_dir: string; series_dir: 
 - `transcode` (MKV, AC3/DTS/EAC3/TrueHD audio, old video codecs): ffmpeg (`tools/ffmpeg/bin`, gyan.dev build, not in git) writes fragmented MP4 on the fly: video copied when `copy_video` (else H.264), audio → AAC stereo. Also a plain `<video src>`, but the stream is not seekable: to seek, load `/play?...&t=<seconds>` and add `t` to `currentTime`; use `PlayInfo.duration` for the timeline. `audio=<i>` picks the audio track (German/English in "DL" releases), `video=h264` forces a video re-encode if the copied codec does not play.
 
 **Ranking.** `score` = language (wanted `audio_lang` found ≫ `multi`) + quality by `sort` (`quality`: height and source, `bitrate`: size, `speed`: seeders) + seeders (log scale) − penalties (no seeders, below `min_height`, CAM).
+
+## Phase 6: filters and facets, faster swarms, tracks, queue, auto-download
+
+Numbers: [torrent-p6.md](torrent-p6.md). Everything in Phase 5 still holds unless stated here.
+
+**Network rule (replaces the DHT / incoming part of Phase 5).** Still nothing outside the tunnel. New inside it: a client-only DHT (BEP 5, read-only) over the tunnel's UDP, whose peers reach the engine through the tracker shim like tracker peers; the public tracker list (ngosang `trackers_all`, fetched through the tunnel, cached 24 h in `data/cache/trackers.txt`, up to 60 trackers per torrent); a forwarded port asked from the VPN server by NAT-PMP through the tunnel (renewed every 45 s) with a listener inside the tunnel that hands incoming peers to the engine's loopback-only listener. PEX runs inside the peer connections. The engine's own DHT, UPnP and local discovery stay off; a stored torrent file that names any tracker but the shim (or a web seed) is not given to the engine. 150 peer slots per torrent.
+
+```ts
+interface Release {                    // Phase 5 fields plus:
+  height: 480 | 576 | 720 | 1080 | 2160 | 4320 | null;
+  source: "Remux" | "BluRay" | "WEB-DL" | "WEBRip" | "HDTV" | "DVD" | "SCR" | "CAM" | "TS" | "TC" | null;
+  cam: boolean;                        // CAM, TS, TC or screener
+  codec: "HEVC" | "H.264" | "AV1" | "XviD" | "VC-1" | "MPEG-2" | null;
+  bit_depth: 8 | 10 | 12 | null;
+  hdr: string | null;                  // best of hdr_all
+  hdr_all: ("DV" | "HDR10+" | "HDR10" | "HDR" | "HLG")[];
+  audio: "Atmos" | "TrueHD" | "DTS-HD MA" | "DTS-HD" | "DTS" | "EAC3" | "AC3" | "AAC" | "FLAC" | "Opus" | "MP3" | "PCM" | null;
+  channels: "7.1" | "5.1" | "2.0" | "1.0" | null;
+  languages: string[];                 // audio: "de", "en", "fr", "it", "es", "ja", "ko" …, "multi", "nordic"
+  subtitles: string[];                 // "German Subbed", "VOSTFR", "ESubs" …
+  dual: boolean;                       // "German DL" (German + original), "Dual Audio"
+  dub: "mic" | "line" | "dubbed" | null;   // MD / LD / AC3D, Dubbed
+  group: string | null; proper: boolean; repack: boolean;
+  edition: "Extended" | "Uncut" | "Director's Cut" | "Unrated" | "IMAX" | "Remastered" | "Theatrical" | null;
+  "3d": boolean;
+}
+
+// TorrentResult plus: added: number | null (upload time, unix seconds, earliest source); age_days: number | null
+// TorrentSearch plus:
+//   facets: { [dimension]: { [value]: count } }   // dimensions: language, sub, res, source, codec, hdr, audio, channels, group (top 30), cam
+//   total: number      // merged results before filters
+//   matched: number    // after filters (results holds the best 120 of them)
+```
+
+**Filters** on `/api/torrents/search` and `/api/torrents/:type/:id` (comma list = any of them; different parameters must all match):
+`language` (`de`, `en`, …, `und` = no language in the name), `sub`, `res` (`2160`, `1080`, `720`, `sd`, `unknown`), `source`, `codec`, `hdr` (`SDR` = none), `audio`, `channels`, `group`, `min_seeders`, `max_size`, `min_size` (bytes), `exclude_cam` (default `true`; `false` shows CAM/TS/TC/screeners). The language filter is `language`, not `lang`: `lang` is the TMDB language of every request. Each facet counts with all *other* filters applied, so a number says how many results choosing that value shows. `facets.cam.true` = hidden CAM copies.
+`mode=fast` ranks for a quick start (many seeders, small file), `mode=quality` for the best release (a healthy swarm is enough, source and resolution decide); without `mode` the saved `sort` applies.
+
+```ts
+// Torrent plus:
+//   state also "queued"; priority: number (-100..100); queue_position: number | null; auto: boolean (queued by a rule)
+//   peers_by_source / known_by_source: { tracker, dht, pex, incoming }   // connected / known to the engine
+//   found_by_source: { tracker, dht }                                     // addresses found
+//   files[]: plus season: number | null, episode: number | null          // season packs
+//   stream_health: { file, playing, position_bytes, position_seconds | null, buffered_bytes, buffered_seconds | null,
+//                    bitrate | null (bit/s), window_bytes, peers, down_speed } | null
+// Vpn plus: forwarded_port: number | null; port_forward_error: string | null; incoming_total; incoming_live; dht_nodes
+// TorrentSettings plus: max_active: number (1..10, default 3); min_free_gb: number (default 5)
+// PlayInfo plus: default_audio: number (saved audio_lang, else the file's default); hevc: boolean;
+//   subtitles: { index, codec, lang, title, default, forced, text }[];   // text = can be served as WebVTT
+//   h264_encoder: "h264_amf" | "libx264"; next_file: { file, season, episode } | null
+
+interface TorrentEvent { id: number; at: string; kind: "finished" | "failed" | "grabbed"; torrent_id: string; name: string; media: TorrentMedia | null; message: string | null }
+
+interface AutoRule {
+  type: MediaType; id: number; title: string; year: number | null; enabled: boolean;
+  min_height: 0 | 480 | 720 | 1080 | 2160; max_height: 0 | 480 | 720 | 1080 | 2160;   // 0 = any
+  lang: string;                        // "any" | "de" | "en" …
+  sources: string[];                   // allowed Release.source values, [] = any
+  max_size_gb: number; min_seeders: number;   // 0 = no size limit; default 3 seeders
+  since: string;                       // series: episodes aired on or after this day (default: the day the rule was made)
+  created_at: number; on_watchlist: boolean;
+}
+interface Grab { key: string; type: MediaType; id: number; title: string; season: number | null; episode: number | null; infohash: string; name: string; size: number; seeders: number; at: string }
+interface Decision { rule: string; title: string; season: number | null; episode: number | null; air_date: string | null; action: "grab" | "none" | "skip"; reason: string | null; found: number; candidate: { infohash, name, size, seeders, height, source, languages } | null }
+```
+
+| Method | Path | Returns |
+|---|---|---|
+| POST | `/api/torrents/start` | also takes `priority`. A new `download` waits for a free slot (`queued`); a `stream` starts at once and is never queued. Before it starts, the free space of the target drive is checked: too little → state `error` with the reason and one `failed` event |
+| PUT | `/api/torrents/:id/priority` | body `{ priority }` → `204`. Order of the queue: streams, then priority, then age |
+| GET | `/api/torrents/events?since=<id>` | `{ events: TorrentEvent[], last: number }`, oldest first, the newest 200 are kept (also over restarts). Poll with the last `last` |
+| GET | `/api/torrents/:id/next?file=<i>` | the next episode's file in a season pack: `{ torrent_id, file, name, size, season, episode, selected, completed, url, playinfo }`; selects it for download when it is not chosen yet. `404` when there is none |
+| GET | `/api/torrents/local/:type/:id?s=&e=` | the same shape plus `state`: a known torrent that already holds this movie / episode. `404` when none does |
+| GET | `/api/torrents/:id/subtitle?file=<i>&track=<i>&t=<seconds>` | the subtitle track as WebVTT, cue times moved `t` seconds earlier (the stream's start). `415` for image subtitles, `404` for an unknown track. While the file is still downloading the cues arrive as the data does |
+| GET | `/api/torrents/:id/seek?file=<i>&t=<seconds>&video=h264&hevc=0` | `{ t, start, requested, exact }`: pass `t` to `/play`; `start` is the file time of the stream's first frame (timeline offset and `/subtitle?t=`). A copied video stream starts at the keyframe before the asked time; a re-encoded one exactly there |
+| GET | `/api/torrents/:id/play?…&hevc=0` | `hevc=0` = the player cannot decode HEVC: that codec is re-encoded to 8-bit H.264 (`PlayInfo.h264_encoder`; `video=h264` uses the same encoder). Without `audio=` the track is `PlayInfo.default_audio` |
+| GET | `/api/autodl/rules` | `{ rules: AutoRule[], last_run: string \| null, interval_minutes: 30 }` |
+| PUT | `/api/autodl/rules/:type/:id` | body: `AutoRule` fields without `type`, `id`, `created_at`, `on_watchlist` (only `title` is required) → `204` |
+| DELETE | `/api/autodl/rules/:type/:id` | `204` |
+| POST | `/api/autodl/preview/:type/:id` | same body as the `PUT`; `{ dry: true, decisions: Decision[] }`: what that rule would take now. Stores and queues nothing; the title need not be on the watchlist |
+| POST | `/api/autodl/run?dry=1` | runs the job now over all enabled rules; `{ dry, decisions }`. With `dry=1` nothing is queued |
+| GET | `/api/autodl/history` | `Grab[]`, newest first |
+| DELETE | `/api/autodl/history/:key` | `204`; the job may take that movie / episode again |
+
+**Auto-download.** The job runs 2 minutes after the start and then every 30 minutes, for enabled rules whose title is on the watchlist. A movie is taken once. For a series the due episodes are those of the season of TMDB's last aired episode with an air date from `since` up to today that are not marked watched, not grabbed before and not in a known torrent; at most 5 per series and run. The best release that fits the rule is queued as a `download` (`auto: true`, a `grabbed` event). CAM/TS/screeners, 3D, mic/line-dubbed audio and (for episodes) season packs are never taken.
+
+**Streaming order.** The engine fetches 32 MiB ahead of every open reader. When a stream starts, the file's first 6 MiB and last 4 MiB come first (container header and index). While a file is read, a helper reader sits at the end of what is buffered, so the window grows to about 2 minutes of playback (32 MiB to 512 MiB). A seek is a new request and moves the priority at once.
+
+**Auto-next from a season pack.** `PlayInfo.next_file` and `/next` name the next episode. When a progress save (`PUT /api/progress/tv/:id`) passes the middle of an episode that plays from a pack, the next episode's file is selected and its start fetched.

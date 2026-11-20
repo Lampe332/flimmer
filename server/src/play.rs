@@ -565,10 +565,7 @@ pub async fn subtitle(State(st): St, Path(id): Path<String>, Query(q): Params) -
     let ffmpeg = tool(&st, "ffmpeg.exe").ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "ffmpeg is missing (tools/ffmpeg)"))?;
     let mut cmd = command(ffmpeg);
     cmd.args(["-v", "error", "-nostdin"]);
-    if t > 30.0 {
-        // Skip what is long over; a cue that is still on screen at `t` starts within these 30 s.
-        cmd.args(["-ss", &format!("{:.3}", t - 30.0)]);
-    }
+    // No `-ss`: after a seek ffmpeg shifts the cue times by its seek margin.
     // The cues keep the file's own times; `VttShift` moves them to the stream's zero (`t`) exactly.
     cmd.arg("-copyts").arg("-i").arg(file_url(&st, &id, index));
     cmd.args(["-map", &format!("0:s:{track}"), "-vn", "-an", "-c:s", "webvtt", "-f", "webvtt", "pipe:1"]);

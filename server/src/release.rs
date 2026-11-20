@@ -576,8 +576,8 @@ pub fn merge_and_rank(hits: Vec<Hit>, filter: &Filter) -> Vec<Torrent> {
 
 // ---------- filters and facets ----------
 
-/// Filter dimensions with a value list (`?lang=de,en&res=1080`): OR inside one, AND between them.
-pub const DIMENSIONS: &[&str] = &["lang", "sub", "res", "source", "codec", "hdr", "audio", "channels", "group"];
+/// Filter dimensions with a value list (`?language=de,en&res=1080`): OR inside one, AND between them.
+pub const DIMENSIONS: &[&str] = &["language", "sub", "res", "source", "codec", "hdr", "audio", "channels", "group"];
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Query {
@@ -618,8 +618,8 @@ pub fn facet_values(t: &Torrent, dim: &str) -> Vec<String> {
     let one = |v: Option<&str>| vec![v.unwrap_or("unknown").to_owned()];
     match dim {
         // "und" = no language stated in the name (by scene convention usually English).
-        "lang" if r.languages.is_empty() => vec!["und".into()],
-        "lang" => r.languages.iter().map(|l| l.to_string()).collect(),
+        "language" if r.languages.is_empty() => vec!["und".into()],
+        "language" => r.languages.iter().map(|l| l.to_string()).collect(),
         "sub" => r.subtitles.iter().map(|l| l.to_string()).collect(),
         "res" => one(match r.height {
             Some(h) if h >= 2160 => Some("2160"),
@@ -960,23 +960,23 @@ mod tests {
         let (all, facets) = filter_with_facets(&list, &query(&[]));
         assert_eq!(all.len(), 6);
         assert_eq!(facets["cam"]["true"], 1);
-        assert_eq!((facets["lang"]["de"], facets["lang"]["en"], facets["lang"]["und"]), (4, 3, 2));
+        assert_eq!((facets["language"]["de"], facets["language"]["en"], facets["language"]["und"]), (4, 3, 2));
         assert_eq!((facets["res"]["1080"], facets["res"]["2160"], facets["res"]["720"]), (4, 1, 1));
         assert_eq!((facets["source"]["BluRay"], facets["source"]["Remux"], facets["source"]["WEB-DL"], facets["source"]["WEBRip"]), (2, 2, 1, 1));
         assert_eq!((facets["hdr"]["SDR"], facets["hdr"]["HDR"]), (5, 1));
         assert_eq!(facets["group"]["AAA"], 2);
 
         // "Deutsch + 1080p + BluRay": only the matching release; each facet counts with the other filters applied.
-        let q = query(&[("lang", "de"), ("res", "1080"), ("source", "bluray")]);
+        let q = query(&[("language", "de"), ("res", "1080"), ("source", "bluray")]);
         let (hits, facets) = filter_with_facets(&list, &q);
         assert_eq!(hits.iter().map(|t| t.infohash.as_str()).collect::<Vec<_>>(), ["1"]);
-        assert_eq!((facets["lang"]["de"], facets["lang"]["und"]), (1, 1));
+        assert_eq!((facets["language"]["de"], facets["language"]["und"]), (1, 1));
         assert_eq!((facets["source"]["BluRay"], facets["source"]["WEB-DL"], facets["source"]["Remux"]), (1, 1, 1));
         assert_eq!(facets["res"]["1080"], 1);
         assert!(!facets["res"].contains_key("2160"));
 
-        assert_eq!(ids(&query(&[("source", "bluray,remux"), ("lang", "de")])), "137");
-        assert_eq!(ids(&query(&[("lang", "de"), ("max_size", "10000000000")])), "123");
+        assert_eq!(ids(&query(&[("source", "bluray,remux"), ("language", "de")])), "137");
+        assert_eq!(ids(&query(&[("language", "de"), ("max_size", "10000000000")])), "123");
         assert_eq!(ids(&query(&[("min_seeders", "100")])), "45");
         assert_eq!(ids(&query(&[("min_seeders", "100"), ("exclude_cam", "false")])), "456");
         assert_eq!(ids(&query(&[("hdr", "hdr"), ("codec", "hevc")])), "3");

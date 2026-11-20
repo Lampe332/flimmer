@@ -89,6 +89,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/autodl/history", get(autodl::history))
         .route("/api/autodl/history/{key}", axum::routing::delete(autodl::history_delete))
         .route("/api/autodl/run", post(autodl::run))
+        .route("/api/autodl/preview/{type}/{id}", post(autodl::preview))
         .route("/api/torrents/{id}", get(torrent::get).delete(torrent::delete))
         .route("/api/torrents/{id}/pause", post(torrent::pause))
         .route("/api/torrents/{id}/resume", post(torrent::resume))

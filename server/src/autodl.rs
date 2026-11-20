@@ -205,13 +205,24 @@ pub fn due(episodes: &[Value], last: (u32, u32), since: &str, today: &str, watch
 
 /// Runs the job once. `dry` only reports what it would queue.
 pub async fn run_once(st: &Arc<AppState>, dry: bool) -> Vec<Decision> {
+    run_rules(st, dry, None).await
+}
+
+/// The job over all enabled rules, or (`preview`) a dry look at one rule that need not be stored
+/// nor on the watchlist: nothing is queued or recorded for a preview.
+async fn run_rules(st: &Arc<AppState>, dry: bool, preview: Option<Rule>) -> Vec<Decision> {
+    let dry = dry || preview.is_some();
     let mut decisions = Vec::new();
     let watchlist: HashSet<(MediaType, u64)> = st.db.list().unwrap_or_default().iter().map(|i| (i.kind, i.id)).collect();
     let done: HashSet<String> = grabs(st).into_iter().map(|g| g.key).collect();
     let saved = scan::load_settings(st).map(|s| s.filter).unwrap_or(scan::Filter { min_height: 0, audio_lang: "any".into(), sort: "quality".into() });
     let today = iso(now_ms())[..10].to_owned();
 
-    for rule in rules(st).into_iter().filter(|r| r.enabled) {
+    let list: Vec<Rule> = match &preview {
+        Some(rule) => vec![rule.clone()],
+        None => rules(st).into_iter().filter(|r| r.enabled).collect(),
+    };
+    for rule in list {
         let name = rule_key(rule.kind, rule.id);
         let decision = |episode: Option<(u32, u32, String)>, action, reason: Option<String>, found, candidate| Decision {
             rule: name.clone(),
@@ -224,7 +235,7 @@ pub async fn run_once(st: &Arc<AppState>, dry: bool) -> Vec<Decision> {
             found,
             candidate,
         };
-        if !watchlist.contains(&(rule.kind, rule.id)) {
+        if preview.is_none() && !watchlist.contains(&(rule.kind, rule.id)) {
             decisions.push(decision(None, "skip", Some("not on the watchlist".into()), 0, None));
             continue;
         }
@@ -355,8 +366,23 @@ pub async fn list(State(st): St) -> ApiResult<Json<Value>> {
 
 /// `PUT /api/autodl/rules/:type/:id`
 pub async fn put(State(st): St, Path((ty, id)): Path<(String, String)>, body: Bytes) -> ApiResult<StatusCode> {
-    let (kind, id) = (media_type(&ty)?, numeric_id(&id)?);
-    let b: RuleBody = serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("invalid body: {e}")))?;
+    let rule = rule_from(&st, &ty, &id, &body)?;
+    let data = serde_json::to_string(&rule).map_err(|_| ApiError::internal("could not encode the rule"))?;
+    st.db.blob_put(Table::Rules, &rule_key(rule.kind, rule.id), &data)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/autodl/preview/:type/:id`: what a rule (the body of `PUT …/rules`) would take right
+/// now. Nothing is stored and nothing is queued; the title need not be on the watchlist.
+pub async fn preview(State(st): St, Path((ty, id)): Path<(String, String)>, body: Bytes) -> ApiResult<Json<Value>> {
+    let rule = rule_from(&st, &ty, &id, &body)?;
+    Ok(Json(json!({ "dry": true, "decisions": run_rules(&st, true, Some(rule)).await })))
+}
+
+/// Validates a rule body; an existing rule keeps its creation time and (unless given) its `since`.
+fn rule_from(st: &AppState, ty: &str, id: &str, body: &[u8]) -> ApiResult<Rule> {
+    let (kind, id) = (media_type(ty)?, numeric_id(id)?);
+    let b: RuleBody = serde_json::from_slice(body).map_err(|e| ApiError::bad_request(format!("invalid body: {e}")))?;
     if b.title.trim().is_empty() {
         return Err(ApiError::bad_request("title is required"));
     }
@@ -391,9 +417,7 @@ pub async fn put(State(st): St, Path((ty, id)): Path<(String, String)>, body: By
         since: b.since.or(old.as_ref().map(|o| o.since.clone())).unwrap_or_else(|| iso(now)[..10].to_owned()),
         created_at: old.map_or(now, |o| o.created_at),
     };
-    let data = serde_json::to_string(&rule).map_err(|_| ApiError::internal("could not encode the rule"))?;
-    st.db.blob_put(Table::Rules, &key, &data)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(rule)
 }
 
 /// `DELETE /api/autodl/rules/:type/:id`
