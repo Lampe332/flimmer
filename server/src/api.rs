@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::{
+    autodl,
     db::Db,
     play, progress,
     scan::{self, Scans},
@@ -40,6 +41,7 @@ pub struct AppState {
     pub scans: Scans,
     pub streams: Streams,
     pub torrents: Arc<crate::torrent::Torrents>,
+    pub autodl: autodl::JobState,
 }
 
 pub(crate) type St = State<Arc<AppState>>;
@@ -80,10 +82,21 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/torrents/start", post(torrent::start))
         .route("/api/torrents/settings", get(torrent::settings_get).put(torrent::settings_put))
         .route("/api/torrents/announce", get(tracker::shim))
+        .route("/api/torrents/events", get(torrent::events))
+        .route("/api/torrents/local/{type}/{id}", get(torrent::local))
+        .route("/api/autodl/rules", get(autodl::list))
+        .route("/api/autodl/rules/{type}/{id}", axum::routing::put(autodl::put).delete(autodl::delete))
+        .route("/api/autodl/history", get(autodl::history))
+        .route("/api/autodl/history/{key}", axum::routing::delete(autodl::history_delete))
+        .route("/api/autodl/run", post(autodl::run))
         .route("/api/torrents/{id}", get(torrent::get).delete(torrent::delete))
         .route("/api/torrents/{id}/pause", post(torrent::pause))
         .route("/api/torrents/{id}/resume", post(torrent::resume))
         .route("/api/torrents/{id}/files", axum::routing::put(torrent::put_files))
+        .route("/api/torrents/{id}/priority", axum::routing::put(torrent::put_priority))
+        .route("/api/torrents/{id}/next", get(torrent::next))
+        .route("/api/torrents/{id}/subtitle", get(play::subtitle))
+        .route("/api/torrents/{id}/seek", get(play::seek))
         .route("/api/torrents/{id}/open", post(torrent::open_folder))
         .route("/api/torrents/{id}/play", get(play::play))
         .route("/api/torrents/{id}/playinfo", get(play::playinfo))

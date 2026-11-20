@@ -2,7 +2,10 @@
 //! the desktop app additionally injects a [`sniff::Sniffer`].
 
 mod api;
+mod autodl;
+mod benc;
 mod db;
+mod dht;
 mod error;
 mod hls;
 mod model;
@@ -126,8 +129,10 @@ pub async fn bind(opts: Options) -> Result<Server, String> {
         scans: scan::Scans::default(),
         streams,
         torrents,
+        autodl: autodl::JobState::default(),
     });
     torrent::spawn_manager(state.clone());
+    autodl::spawn(state.clone());
 
     let cors = CorsLayer::new()
         .allow_origin(HeaderValue::from_static(DEV_ORIGIN))

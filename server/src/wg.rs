@@ -41,6 +41,8 @@ const TCP_TX: usize = 64 * 1024;
 const HANDSHAKE_WAIT: Duration = Duration::from_secs(10);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const DNS_TIMEOUT: Duration = Duration::from_secs(8);
+/// Listening sockets kept ready per [`Listener`] (each takes one incoming connection).
+const BACKLOG: usize = 8;
 
 /// A parsed WireGuard `.conf`. Holds key material: no `Debug`, and no error ever quotes a value.
 pub struct WgConfig {
@@ -52,6 +54,13 @@ pub struct WgConfig {
     endpoint: String,
     keepalive: u16,
     mtu: usize,
+}
+
+impl WgConfig {
+    /// The VPN server's address inside the tunnel (its DNS server; Proton: 10.2.0.1). NAT-PMP is asked there.
+    pub fn gateway(&self) -> Ipv4Addr {
+        self.dns.first().copied().unwrap_or(Ipv4Addr::new(10, 2, 0, 1))
+    }
 }
 
 fn key(map: &HashMap<String, String>, name: &str, label: &str) -> Result<[u8; 32], String> {
@@ -185,6 +194,7 @@ pub struct Tunnel {
     tx_bytes: AtomicU64,
     /// Milliseconds since `started` of the last handshake + 1; 0 = none yet.
     handshake_at: AtomicU64,
+    gateway: Ipv4Addr,
 }
 
 fn dead() -> io::Error {
@@ -211,6 +221,7 @@ impl Tunnel {
             None,
         );
 
+        let gateway = cfg.gateway();
         let mut dev = Queues { rx: VecDeque::new(), tx: VecDeque::new(), mtu: cfg.mtu };
         let mut config = Config::new(HardwareAddress::Ip);
         config.random_seed = rand::random();
@@ -233,6 +244,7 @@ impl Tunnel {
             rx_bytes: AtomicU64::new(0),
             tx_bytes: AtomicU64::new(0),
             handshake_at: AtomicU64::new(0),
+            gateway,
         });
         tokio::spawn(tunnel.clone().drive(tunn, udp));
 
@@ -254,6 +266,10 @@ impl Tunnel {
 
     pub fn is_alive(&self) -> bool {
         self.alive.load(Ordering::SeqCst)
+    }
+
+    pub fn gateway(&self) -> Ipv4Addr {
+        self.gateway
     }
 
     pub fn stats(&self) -> TunnelStats {
@@ -368,11 +384,7 @@ impl Tunnel {
         let handle = {
             let mut guard = self.lock();
             let s = &mut *guard;
-            let mut socket =
-                tcp::Socket::new(tcp::SocketBuffer::new(vec![0; TCP_RX]), tcp::SocketBuffer::new(vec![0; TCP_TX]));
-            socket.set_nagle_enabled(false);
-            socket.set_keep_alive(Some(smoltcp::time::Duration::from_secs(30)));
-            socket.set_timeout(Some(smoltcp::time::Duration::from_secs(90)));
+            let mut socket = Self::tcp_socket();
             let port = s.port();
             socket
                 .connect(s.iface.context(), IpEndpoint::new(IpAddress::Ipv4(*addr.ip()), addr.port()), port)
@@ -405,12 +417,35 @@ impl Tunnel {
         }
     }
 
+    fn tcp_socket() -> tcp::Socket<'static> {
+        let mut socket = tcp::Socket::new(tcp::SocketBuffer::new(vec![0; TCP_RX]), tcp::SocketBuffer::new(vec![0; TCP_TX]));
+        socket.set_nagle_enabled(false);
+        socket.set_keep_alive(Some(smoltcp::time::Duration::from_secs(30)));
+        socket.set_timeout(Some(smoltcp::time::Duration::from_secs(90)));
+        socket
+    }
+
+    /// Accepts TCP connections that arrive through the tunnel on `port` (the VPN's forwarded port).
+    pub fn listen(self: &Arc<Self>, port: u16) -> io::Result<Listener> {
+        if !self.is_alive() {
+            return Err(dead());
+        }
+        let listener = Listener { tunnel: self.clone(), port, handles: Mutex::new(Vec::new()) };
+        listener.refill()?;
+        Ok(listener)
+    }
+
     pub fn udp(self: &Arc<Self>) -> io::Result<UdpConn> {
+        self.udp_sized(16, 16 * 1024)
+    }
+
+    /// A UDP socket with room for `packets` datagrams / `bytes` in each direction (DHT lookups need more).
+    pub fn udp_sized(self: &Arc<Self>, packets: usize, bytes: usize) -> io::Result<UdpConn> {
         if !self.is_alive() {
             return Err(dead());
         }
         let mut guard = self.lock();
-        let buffer = || udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 16], vec![0; 16 * 1024]);
+        let buffer = || udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; packets], vec![0; bytes]);
         let mut socket = udp::Socket::new(buffer(), buffer());
         let port = guard.port();
         socket.bind(port).map_err(|_| io::Error::other("udp bind failed"))?;
@@ -533,7 +568,83 @@ impl Drop for TcpConn {
     }
 }
 
-/// A UDP socket inside the tunnel (tracker announces).
+/// A listening TCP port inside the tunnel. smoltcp has one socket per connection, so a small pool
+/// of listening sockets waits on the port; an accepted one is replaced at once.
+pub struct Listener {
+    tunnel: Arc<Tunnel>,
+    port: u16,
+    handles: Mutex<Vec<SocketHandle>>,
+}
+
+impl Listener {
+    fn refill(&self) -> io::Result<()> {
+        let mut handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.tunnel.lock();
+        while handles.len() < BACKLOG {
+            let mut socket = Tunnel::tcp_socket();
+            socket.listen(self.port).map_err(|_| io::Error::other("tcp listen failed"))?;
+            handles.push(guard.sockets.add(socket));
+        }
+        Ok(())
+    }
+
+    /// The next established incoming connection and who it is from.
+    pub async fn accept(&self) -> io::Result<(TcpConn, SocketAddrV4)> {
+        loop {
+            let ready = poll_fn(|cx| {
+                if !self.tunnel.is_alive() {
+                    return Poll::Ready(Err(dead()));
+                }
+                let mut handles = self.handles.lock().unwrap_or_else(|e| e.into_inner());
+                let mut guard = self.tunnel.lock();
+                for i in 0..handles.len() {
+                    let socket = guard.sockets.get_mut::<tcp::Socket>(handles[i]);
+                    match socket.state() {
+                        tcp::State::Established | tcp::State::CloseWait => {
+                            let IpAddress::Ipv4(ip) = socket.remote_endpoint().map(|e| e.addr).unwrap_or(IpAddress::Ipv4(Ipv4Addr::UNSPECIFIED));
+                            let from = SocketAddrV4::new(ip, socket.remote_endpoint().map_or(0, |e| e.port));
+                            return Poll::Ready(Ok(Some((handles.swap_remove(i), from))));
+                        }
+                        // Fell out of the handshake for good: replace it.
+                        tcp::State::Closed | tcp::State::TimeWait | tcp::State::Closing | tcp::State::LastAck => {
+                            let handle = handles.swap_remove(i);
+                            guard.sockets.get_mut::<tcp::Socket>(handle).abort();
+                            guard.closing.push(handle);
+                            return Poll::Ready(Ok(None));
+                        }
+                        _ => {
+                            socket.register_recv_waker(cx.waker());
+                            socket.register_send_waker(cx.waker());
+                        }
+                    }
+                }
+                Poll::Pending
+            });
+            // The wakers fire on state changes; the timeout only guards against a missed one.
+            let taken = match tokio::time::timeout(Duration::from_secs(2), ready).await {
+                Ok(r) => r?,
+                Err(_) => None,
+            };
+            self.refill()?;
+            if let Some((handle, from)) = taken {
+                return Ok((TcpConn { tunnel: self.tunnel.clone(), handle }, from));
+            }
+        }
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        let handles = std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut guard = self.tunnel.lock();
+        for handle in handles {
+            guard.sockets.get_mut::<tcp::Socket>(handle).abort();
+            guard.closing.push(handle);
+        }
+    }
+}
+
+/// A UDP socket inside the tunnel (tracker announces, DHT, NAT-PMP).
 pub struct UdpConn {
     tunnel: Arc<Tunnel>,
     handle: SocketHandle,
@@ -556,6 +667,11 @@ impl UdpConn {
 
     /// Callers bound this with a timeout: a dead tunnel never wakes it.
     pub async fn recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        self.recv_from(buf).await.map(|(n, _)| n)
+    }
+
+    /// Like [`UdpConn::recv`], with the sender's address.
+    pub async fn recv_from(&self, buf: &mut [u8]) -> io::Result<(usize, SocketAddrV4)> {
         poll_fn(|cx| {
             if !self.tunnel.is_alive() {
                 return Poll::Ready(Err(dead()));
@@ -563,7 +679,10 @@ impl UdpConn {
             let mut guard = self.tunnel.lock();
             let socket = guard.sockets.get_mut::<udp::Socket>(self.handle);
             match socket.recv_slice(buf) {
-                Ok((n, _)) => Poll::Ready(Ok(n)),
+                Ok((n, meta)) => {
+                    let IpAddress::Ipv4(ip) = meta.endpoint.addr;
+                    Poll::Ready(Ok((n, SocketAddrV4::new(ip, meta.endpoint.port))))
+                }
                 Err(_) => {
                     socket.register_recv_waker(cx.waker());
                     Poll::Pending
@@ -610,6 +729,15 @@ mod tests {
         let mut listener = tcp::Socket::new(tcp::SocketBuffer::new(vec![0; 65536]), tcp::SocketBuffer::new(vec![0; 65536]));
         listener.listen(7).unwrap();
         let handle = sockets.add(listener);
+        let datagrams = || udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; 4], vec![0; 2048]);
+        let mut echo = udp::Socket::new(datagrams(), datagrams());
+        echo.bind(9).unwrap();
+        let echo = sockets.add(echo);
+        let mut control = udp::Socket::new(datagrams(), datagrams());
+        control.bind(10).unwrap();
+        let control = sockets.add(control);
+        let dialer = sockets.add(tcp::Socket::new(tcp::SocketBuffer::new(vec![0; 4096]), tcp::SocketBuffer::new(vec![0; 4096])));
+        let mut greeted = false;
         let started = Instant::now();
         let (mut wire, mut buf) = (vec![0u8; 65536], vec![0u8; 65536]);
         let mut client = None;
@@ -636,8 +764,26 @@ mod tests {
             let socket = sockets.get_mut::<tcp::Socket>(handle);
             let mut data = [0u8; 4096];
             while socket.can_recv() && socket.can_send() {
-                let n = socket.recv_slice(&mut data).unwrap();
-                socket.send_slice(&data[..n]).unwrap();
+                // Only take what fits into the send buffer: an echo must not drop bytes.
+                let room = (socket.send_capacity() - socket.send_queue()).min(data.len());
+                if room == 0 {
+                    break;
+                }
+                let n = socket.recv_slice(&mut data[..room]).unwrap();
+                assert_eq!(socket.send_slice(&data[..n]).unwrap(), n);
+            }
+            let socket = sockets.get_mut::<udp::Socket>(echo);
+            if let Ok((n, meta)) = socket.recv_slice(&mut data) {
+                socket.send_slice(&data[..n], meta.endpoint).unwrap();
+            }
+            if sockets.get_mut::<udp::Socket>(control).recv_slice(&mut data).is_ok() {
+                let cx = iface.context();
+                sockets.get_mut::<tcp::Socket>(dialer).connect(cx, (IpAddress::Ipv4(Ipv4Addr::new(10, 9, 0, 2)), 4000), 50000).unwrap();
+            }
+            let socket = sockets.get_mut::<tcp::Socket>(dialer);
+            if !greeted && socket.can_send() {
+                socket.send_slice(b"hello").unwrap();
+                greeted = true;
             }
             iface.poll(now, &mut dev, &mut sockets);
             for packet in dev.tx.drain(..) {
@@ -669,6 +815,26 @@ mod tests {
             mtu: DEFAULT_MTU,
         };
         let tunnel = Tunnel::start(cfg).await.expect("handshake");
+        assert_eq!(tunnel.gateway(), Ipv4Addr::new(10, 2, 0, 1));
+
+        // UDP with the sender's address (DHT, NAT-PMP): the peer echoes datagrams on port 9.
+        let udp = tunnel.udp_sized(8, 4096).unwrap();
+        udp.send_to(b"ping", "10.9.0.1:9".parse().unwrap()).unwrap();
+        let mut reply = [0u8; 16];
+        let (n, from) = tokio::time::timeout(Duration::from_secs(5), udp.recv_from(&mut reply)).await.expect("udp echo").unwrap();
+        assert_eq!((&reply[..n], from), (&b"ping"[..], "10.9.0.1:9".parse().unwrap()));
+
+        // Incoming TCP: the peer dials 10.9.0.2:4000 when it gets "dial" on UDP port 10.
+        let listener = tunnel.listen(4000).unwrap();
+        udp.send_to(b"dial", "10.9.0.1:10".parse().unwrap()).unwrap();
+        let (mut incoming, from) = tokio::time::timeout(Duration::from_secs(5), listener.accept()).await.expect("incoming connection").unwrap();
+        assert_eq!(*from.ip(), Ipv4Addr::new(10, 9, 0, 1));
+        let mut hello = [0u8; 5];
+        tokio::time::timeout(Duration::from_secs(5), incoming.read_exact(&mut hello)).await.expect("incoming data").unwrap();
+        assert_eq!(&hello, b"hello");
+        drop(incoming);
+        drop(listener);
+
         let mut conn = tunnel.connect("10.9.0.1:7".parse().unwrap()).await.expect("connect");
         // More than one window, so segmentation, ACKs and window updates are exercised.
         let sent: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();

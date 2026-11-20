@@ -6,7 +6,7 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -19,7 +19,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    api::{Params, St, title_ref},
+    api::{AppState, Params, St, TitleRef, title_ref},
+    db::now_ms,
     error::{ApiError, ApiResult},
     model::MediaType,
     release::{self, Hit, clean_hash, normalize, parse_magnet, parse_size},
@@ -52,11 +53,17 @@ enum Fail {
     Error(String),
 }
 
-type Found = Result<Vec<Hit>, Fail>;
+type Hits = Result<Vec<Hit>, Fail>;
+
+/// The merged, unfiltered and unranked result of one search.
+pub struct Found {
+    pub torrents: Vec<release::Torrent>,
+    statuses: Vec<SourceStatus>,
+}
 
 pub struct Searcher {
     http: reqwest::Client,
-    cache: Mutex<HashMap<String, (Instant, Value)>>,
+    cache: Mutex<HashMap<String, (Instant, Arc<Found>)>>,
 }
 
 impl Searcher {
@@ -110,6 +117,26 @@ fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
+/// "2024-05-01…" → unix seconds (date precision).
+fn date_secs(text: &str) -> Option<i64> {
+    let mut parts = text.get(..10)?.split('-').map(|p| p.parse::<i64>().ok());
+    let (y, m, d) = (parts.next()??, parts.next()??, parts.next()??);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Days from civil (Howard Hinnant).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400)
+}
+
+fn unix(v: &Value) -> Option<i64> {
+    Some(num(v) as i64).filter(|n| *n > 0)
+}
+
 fn path_enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect::<String>().replace('+', "%20")
 }
@@ -146,7 +173,7 @@ fn queries(s: &Search) -> Vec<String> {
 
 // ---------- sources ----------
 
-async fn knaben(http: &reqwest::Client, s: &Search) -> Found {
+async fn knaben(http: &reqwest::Client, s: &Search) -> Hits {
     let mut out = Vec::new();
     for q in &s.texts {
         let body = json!({
@@ -156,13 +183,17 @@ async fn knaben(http: &reqwest::Client, s: &Search) -> Found {
         });
         let v = get_json(http.post("https://api.knaben.org/v1").json(&body)).await?;
         for h in v.get("hits").and_then(Value::as_array).into_iter().flatten() {
-            out.extend(hit("knaben", str_of(h, "hash"), str_of(h, "title"), num(&h["bytes"]), num(&h["seeders"]), num(&h["peers"])));
+            let mut found = hit("knaben", str_of(h, "hash"), str_of(h, "title"), num(&h["bytes"]), num(&h["seeders"]), num(&h["peers"]));
+            if let Some(f) = &mut found {
+                f.added = date_secs(str_of(h, "date"));
+            }
+            out.extend(found);
         }
     }
     Ok(out)
 }
 
-async fn yts(http: &reqwest::Client, s: &Search) -> Found {
+async fn yts(http: &reqwest::Client, s: &Search) -> Hits {
     if s.kind == Some(MediaType::Tv) {
         return Err(Fail::Skipped("movies only"));
     }
@@ -190,6 +221,7 @@ async fn yts(http: &reqwest::Client, s: &Search) -> Found {
                 let mut h = hit("yts", str_of(t, "hash"), &name, num(&t["size_bytes"]), num(&t["seeds"]), num(&t["peers"]));
                 if let Some(h) = &mut h {
                     h.exact = s.imdb.is_some();
+                    h.added = unix(&t["date_uploaded_unix"]);
                 }
                 out.extend(h);
             }
@@ -199,7 +231,7 @@ async fn yts(http: &reqwest::Client, s: &Search) -> Found {
     Err(last)
 }
 
-async fn eztv(http: &reqwest::Client, s: &Search) -> Found {
+async fn eztv(http: &reqwest::Client, s: &Search) -> Hits {
     let (Some(imdb), Some((season, episode))) = (&s.imdb, s.episode) else {
         return Err(Fail::Skipped("needs an episode with IMDb id"));
     };
@@ -220,6 +252,7 @@ async fn eztv(http: &reqwest::Client, s: &Search) -> Found {
             let mut h = hit("eztv", str_of(t, "hash"), name, num(&t["size_bytes"]), num(&t["seeds"]), num(&t["peers"]));
             if let Some(h) = &mut h {
                 h.exact = true;
+                h.added = unix(&t["date_released_unix"]);
                 h.trackers = parse_magnet(str_of(t, "magnet_url")).map(|m| m.2).unwrap_or_default();
             }
             out.extend(h);
@@ -231,7 +264,7 @@ async fn eztv(http: &reqwest::Client, s: &Search) -> Found {
     Ok(out)
 }
 
-async fn nyaa(http: &reqwest::Client, s: &Search) -> Found {
+async fn nyaa(http: &reqwest::Client, s: &Search) -> Hits {
     static FIELD: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?s)<title>(.*?)</title>.*?<nyaa:seeders>(\d+)<.*?<nyaa:leechers>(\d+)<.*?<nyaa:infoHash>([0-9a-fA-F]{40})<.*?<nyaa:size>([^<]+)<")
             .expect("static regex")
@@ -249,7 +282,7 @@ async fn nyaa(http: &reqwest::Client, s: &Search) -> Found {
     Ok(out)
 }
 
-async fn piratebay(http: &reqwest::Client, s: &Search) -> Found {
+async fn piratebay(http: &reqwest::Client, s: &Search) -> Hits {
     let mut out = Vec::new();
     for q in queries(s) {
         let v = get_json(http.get("https://apibay.org/q.php").query(&[("q", q.as_str()), ("cat", "200")])).await?;
@@ -260,6 +293,7 @@ async fn piratebay(http: &reqwest::Client, s: &Search) -> Found {
             let mut h = hit("piratebay", str_of(t, "info_hash"), str_of(t, "name"), num(&t["size"]), num(&t["seeders"]), num(&t["leechers"]));
             if let Some(h) = &mut h {
                 h.exact = s.kind == Some(MediaType::Movie) && s.imdb.as_deref().is_some_and(|i| i == str_of(t, "imdb"));
+                h.added = unix(&t["added"]);
             }
             out.extend(h);
         }
@@ -283,7 +317,7 @@ fn first_magnet(html: &str) -> Option<String> {
     MAGNET.captures(html).map(|c| unescape(&c[1]))
 }
 
-async fn x1337(http: &reqwest::Client, s: &Search) -> Found {
+async fn x1337(http: &reqwest::Client, s: &Search) -> Hits {
     const BASE: &str = "https://1337x.to";
     let q = s.texts.first().ok_or(Fail::Skipped("no query"))?;
     let html = text(http.get(format!("{BASE}/search/{}/1/", path_enc(q)))).await?;
@@ -303,7 +337,7 @@ async fn x1337(http: &reqwest::Client, s: &Search) -> Found {
         .collect())
 }
 
-async fn therarbg(http: &reqwest::Client, s: &Search) -> Found {
+async fn therarbg(http: &reqwest::Client, s: &Search) -> Hits {
     let mut out = Vec::new();
     for q in queries(s) {
         let v = get_json(http.get(format!("https://therarbg.to/get-posts/keywords:{}:format:json/", path_enc(&q)))).await?;
@@ -314,6 +348,7 @@ async fn therarbg(http: &reqwest::Client, s: &Search) -> Found {
             let mut h = hit("therarbg", str_of(t, "h"), str_of(t, "n"), num(&t["s"]), num(&t["se"]), num(&t["le"]));
             if let Some(h) = &mut h {
                 h.exact = s.kind == Some(MediaType::Movie) && s.imdb.as_deref().is_some_and(|i| i == str_of(t, "i"));
+                h.added = unix(&t["a"]);
             }
             out.extend(h);
         }
@@ -331,7 +366,7 @@ fn lime_rows(html: &str) -> Vec<Hit> {
     ROW.captures_iter(html).filter_map(|c| hit("limetorrents", &c[1], &unescape(&c[2]), parse_size(&c[3]), n(&c[4]), n(&c[5]))).collect()
 }
 
-async fn limetorrents(http: &reqwest::Client, s: &Search) -> Found {
+async fn limetorrents(http: &reqwest::Client, s: &Search) -> Hits {
     let mut out = Vec::new();
     for q in &s.texts {
         let html = text(http.get(format!("https://www.limetorrents.fun/search/all/{}/seeds/1/", path_enc(q)))).await?;
@@ -360,7 +395,7 @@ fn torrentio_hit(stream: &Value) -> Option<Hit> {
     Some(h)
 }
 
-async fn torrentio(http: &reqwest::Client, s: &Search) -> Found {
+async fn torrentio(http: &reqwest::Client, s: &Search) -> Hits {
     let imdb = s.imdb.as_ref().ok_or(Fail::Skipped("needs an IMDb id"))?;
     let path = match s.episode {
         Some((se, ep)) => format!("series/{imdb}:{se}:{ep}"),
@@ -372,7 +407,7 @@ async fn torrentio(http: &reqwest::Client, s: &Search) -> Found {
 
 // ---------- orchestration ----------
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct SourceStatus {
     id: &'static str,
     /// "ok" | "blocked" | "error" | "skipped"
@@ -382,7 +417,7 @@ struct SourceStatus {
     error: Option<String>,
 }
 
-type SourceFuture<'a> = Pin<Box<dyn Future<Output = Found> + Send + 'a>>;
+type SourceFuture<'a> = Pin<Box<dyn Future<Output = Hits> + Send + 'a>>;
 
 fn sources<'a>(http: &'a reqwest::Client, s: &'a Search) -> Vec<(&'static str, SourceFuture<'a>)> {
     vec![
@@ -433,12 +468,13 @@ pub fn fold(title: &str) -> String {
     normalize(&plain.replace('ß', "ss").replace('&', " and "))
 }
 
-async fn run(st: &crate::api::AppState, key: String, s: Search) -> ApiResult<Json<Value>> {
+/// Runs all sources (or takes the 5-minute cache) and merges their hits.
+async fn collect(st: &AppState, key: String, s: Search) -> Arc<Found> {
     let searcher = &st.torrents.searcher;
-    if let Some((at, v)) = searcher.cache.lock().unwrap().get(&key)
+    if let Some((at, found)) = searcher.cache.lock().unwrap().get(&key)
         && at.elapsed() < CACHE_TTL
     {
-        return Ok(Json(v.clone()));
+        return found.clone();
     }
     let jobs = sources(&searcher.http, &s).into_iter().map(|(id, job)| async move {
         let start = Instant::now();
@@ -461,14 +497,30 @@ async fn run(st: &crate::api::AppState, key: String, s: Search) -> ApiResult<Jso
         };
         statuses.push(SourceStatus { id, status, count, ms, error });
     }
-    let filter = load_settings(st)?.filter;
-    let mut results = release::merge_and_rank(hits, &filter);
-    results.truncate(MAX_RESULTS);
-    let v = json!({ "results": results, "sources": statuses });
+    let found = Arc::new(Found { torrents: release::merge(hits, now_ms() / 1000), statuses });
     let mut cache = searcher.cache.lock().unwrap();
     cache.retain(|_, (at, _)| at.elapsed() < CACHE_TTL);
-    cache.insert(key, (Instant::now(), v.clone()));
-    Ok(Json(v))
+    cache.insert(key, (Instant::now(), found.clone()));
+    found
+}
+
+/// Filters (`lang`, `res`, `source` …), facets and ranking (`mode=fast|quality`) of one request.
+fn respond(st: &AppState, found: &Found, q: &HashMap<String, String>) -> ApiResult<Json<Value>> {
+    let query = release::Query::from_params(q).map_err(ApiError::bad_request)?;
+    let mode = match q.get("mode").map(String::as_str) {
+        None => None,
+        Some(m @ ("fast" | "quality")) => Some(m),
+        Some(_) => return Err(ApiError::bad_request("'mode' must be 'fast' or 'quality'")),
+    };
+    let filter = load_settings(st)?.filter;
+    let (mut results, facets) = release::filter_with_facets(&found.torrents, &query);
+    release::rank(&mut results, &release::Ranking { filter: &filter, mode });
+    let matched = results.len();
+    results.truncate(MAX_RESULTS);
+    Ok(Json(json!({
+        "results": results, "sources": found.statuses, "facets": facets,
+        "total": found.torrents.len(), "matched": matched,
+    })))
 }
 
 /// `GET /api/torrents/search?q=`
@@ -477,12 +529,19 @@ pub async fn free(State(st): St, Query(q): Params) -> ApiResult<Json<Value>> {
     if text.len() < 2 {
         return Err(ApiError::bad_request("'q' is required (at least 2 characters)"));
     }
-    run(&st, format!("q:{}", text.to_lowercase()), Search { texts: vec![text.to_owned()], ..Search::default() }).await
+    let found = collect(&st, format!("q:{}", text.to_lowercase()), Search { texts: vec![text.to_owned()], ..Search::default() }).await;
+    respond(&st, &found, &q)
 }
 
 /// `GET /api/torrents/:type/:id?s=&e=`: torrents of one movie / episode.
 pub async fn by_title(State(st): St, Path((ty, id)): Path<(String, String)>, Query(q): Params) -> ApiResult<Json<Value>> {
     let t = title_ref(&ty, &id, &q)?;
+    let found = search_title(&st, &t).await?;
+    respond(&st, &found, &q)
+}
+
+/// All torrents of one movie / episode (merged, unfiltered); also what the auto-download job searches.
+pub async fn search_title(st: &AppState, t: &TitleRef) -> ApiResult<Arc<Found>> {
     let params = [("append_to_response", "external_ids".to_owned())];
     let v = st.tmdb.get(&format!("/{}/{}", t.kind.as_str(), t.id), &params, Some(TTL_TITLE)).await?;
     let pick = |keys: [&str; 2]| keys.iter().find_map(|k| v.get(*k).and_then(Value::as_str)).unwrap_or_default().to_owned();
@@ -512,12 +571,19 @@ pub async fn by_title(State(st): St, Path((ty, id)): Path<(String, String)>, Que
         titles: names.iter().map(|n| fold(n)).collect(),
         year,
     };
-    run(&st, t.key(), search).await
+    Ok(collect(st, t.key(), search).await)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_upload_dates() {
+        assert_eq!(date_secs("1970-01-02T00:00:00+00:00"), Some(86_400));
+        assert_eq!(date_secs("2024-03-01 10:00"), Some(1_709_251_200));
+        assert_eq!(date_secs("soon"), None);
+    }
 
     #[test]
     fn parses_1337x_pages() {

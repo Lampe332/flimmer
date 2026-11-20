@@ -124,6 +124,10 @@ pub async fn put(
     if finished || position >= MIN_WATCHED_S {
         st.db.history_touch(&key, position, b.duration, finished, &b.meta)?;
     }
+    if key.kind == MediaType::Tv {
+        // Playing from a season pack: get the next episode's file ready for auto-next.
+        tokio::spawn(crate::torrent::on_progress(st.clone(), key.id, key.season, key.episode, position, b.duration));
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -177,7 +181,12 @@ async fn show(st: &AppState, id: u64) -> ApiResult<Show> {
     Ok(Show { seasons, last_aired })
 }
 
-async fn season_episodes(st: &AppState, id: u64, season: u32) -> ApiResult<Vec<Value>> {
+/// (season, episode) of the newest aired episode of a series.
+pub(crate) async fn last_aired(st: &AppState, id: u64) -> ApiResult<Option<(u32, u32)>> {
+    Ok(show(st, id).await?.last_aired.map(|(s, e, _)| (s, e)))
+}
+
+pub(crate) async fn season_episodes(st: &AppState, id: u64, season: u32) -> ApiResult<Vec<Value>> {
     let v = st.tmdb.get(&format!("/tv/{id}/season/{season}"), &[], Some(TTL_SHOW)).await?;
     Ok(v.get("episodes").and_then(Value::as_array).cloned().unwrap_or_default())
 }

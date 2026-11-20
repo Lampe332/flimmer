@@ -19,6 +19,12 @@ pub enum Table {
     Streams,
     Settings,
     Torrents,
+    /// Torrent notifications (finished / failed / grabbed).
+    Events,
+    /// Auto-download rules, keyed `"<type>:<tmdb id>"`.
+    Rules,
+    /// What the auto-download job queued, keyed like a rule plus `":<season>:<episode>"` for episodes.
+    Grabs,
 }
 
 impl Table {
@@ -28,6 +34,9 @@ impl Table {
             Self::Streams => "streams",
             Self::Settings => "settings",
             Self::Torrents => "torrents",
+            Self::Events => "torrent_events",
+            Self::Rules => "autodl_rules",
+            Self::Grabs => "autodl_grabs",
         }
     }
 }
@@ -57,6 +66,9 @@ impl Db {
              CREATE TABLE IF NOT EXISTS streams  (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS torrents (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS torrent_events (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS autodl_rules (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS autodl_grabs (key TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS progress (
                  type       TEXT    NOT NULL,
                  id         INTEGER NOT NULL,
