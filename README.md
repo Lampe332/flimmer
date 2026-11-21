@@ -14,7 +14,7 @@ Stand: Es gibt noch keine fertigen Downloads. Du baust den Windows-Installer und
 - **Merkliste, Verlauf, Weiterschauen:** Der Fortschritt bleibt pro Titel und Folge erhalten.
 - **Downloads und Auto-Downloads:** Filme und Folgen lassen sich auf die Platte laden, auch regelbasiert.
 - **Android ohne PC:** Die APK bringt Server, Quellensuche, Torrents und Player mit. Der PC muss nicht laufen.
-- **Handy-Player mit Gesten:** Doppeltipp links oder rechts spult 10 Sekunden, Langdruck spielt mit 2x Tempo, Wischen regelt Helligkeit und Lautstärke. Das Vorbild ist Seanime Mobile.
+- **Handy-Player mit Gesten:** Doppeltipp links springt 5 Sekunden zurück, rechts 10 Sekunden vor, Langdruck spielt mit 2x Tempo, Wischen regelt Helligkeit und Lautstärke. Das Vorbild ist Seanime Mobile.
 - **Handy oder Tablet am PC koppeln:** Der WLAN-Modus verbindet weitere Geräte per PIN oder QR-Code mit dem Server auf dem PC.
 
 ## Screenshots
