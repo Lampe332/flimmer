@@ -127,7 +127,7 @@ export interface AutoRule {
 
 export type AutoRuleBody = Omit<AutoRule, 'type' | 'id' | 'created_at' | 'on_watchlist' | 'since'> & { since?: string }
 
-export interface Grab {
+interface Grab {
   key: string
   type: MediaType
   id: number
@@ -389,7 +389,7 @@ export function formatBytes(n: number): string {
   return `${v.toLocaleString(locale(), { maximumFractionDigits: digits, minimumFractionDigits: digits })} ${UNITS[i]}`
 }
 
-export function formatSpeed(bps: number): string {
+function formatSpeed(bps: number): string {
   return `${formatBytes(bps)}/s`
 }
 
@@ -482,7 +482,7 @@ export function likelyDirect(r: TorrentResult): boolean {
 
 // ---- VPN in plain words ----
 
-export type VpnProblem = { title: Key; text: Key }
+type VpnProblem = { title: Key; text: Key }
 
 /** A friendly explanation for why the tunnel does not work, or null when it is fine. */
 export function vpnProblem(v: Vpn | undefined): VpnProblem | null {

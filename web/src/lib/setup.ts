@@ -9,7 +9,7 @@ export interface SetupState {
   defaults: { movies_dir: string; series_dir: string }
 }
 
-export interface Maintenance {
+interface Maintenance {
   stream_cache_bytes: number
   scan_profile_bytes: number
   scan_profile_pending: boolean

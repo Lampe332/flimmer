@@ -9,7 +9,7 @@ const NAMES: Record<Exclude<AudioLang, 'any'>, string[]> = {
   en: ['english', 'englisch'],
 }
 
-export function hasLanguage(tracks: Track[], want: AudioLang): boolean {
+function hasLanguage(tracks: Track[], want: AudioLang): boolean {
   if (want === 'any') return true
   return tracks.some((t) => {
     const lang = (t.lang ?? '').toLowerCase().split('-')[0] ?? ''
@@ -18,7 +18,7 @@ export function hasLanguage(tracks: Track[], want: AudioLang): boolean {
   })
 }
 
-export type Fit = { height: boolean; lang: boolean }
+type Fit = { height: boolean; lang: boolean }
 
 export function fit(r: ScanResult, f: Filter): Fit {
   return {
@@ -47,9 +47,9 @@ export function rank(results: ScanResult[], f: Filter): ScanResult[] {
 }
 
 /** Seeders a torrent needs before the automatic choice trusts it to stream smoothly. */
-export const TORRENT_MIN_SEEDS = 10
+const TORRENT_MIN_SEEDS = 10
 /** A resolution win alone needs a well seeded torrent. */
-export const TORRENT_HEIGHT_SEEDS = 25
+const TORRENT_HEIGHT_SEEDS = 25
 
 /**
  * Auto-pick rule between the best provider stream and the best torrent (both already ranked by the saved filter).

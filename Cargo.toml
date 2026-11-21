@@ -4,6 +4,6 @@ members = ["server", "desktop"]
 exclude = ["spike"]
 
 [profile.release]
-lto = "thin"
-codegen-units = 4
+lto = "fat"
+codegen-units = 1
 strip = true

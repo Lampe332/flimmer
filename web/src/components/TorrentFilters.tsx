@@ -19,7 +19,7 @@ export function useTorrentFilter() {
   }
 }
 
-export const activeCount = (f: TorrentFilter) =>
+const activeCount = (f: TorrentFilter) =>
   FILTER_DIMS.reduce((n, d) => n + (f.values[d]?.length ?? 0), 0) + Number(f.minSeeders > 0) + Number(f.minSizeGb > 0 || f.maxSizeGb > 0) + Number(f.cam)
 
 /** Rows of the bar, in reading order; "Ton" holds both format and channels. */
@@ -254,7 +254,7 @@ function SizeRange({ filter, onFilter }: { filter: TorrentFilter; onFilter: (f: 
 }
 
 /** One line for the folded bar: "Deutsch · 1080p · BluRay". */
-export function describe(f: TorrentFilter, t: T): string {
+function describe(f: TorrentFilter, t: T): string {
   const parts: string[] = []
   for (const dim of FILTER_DIMS) for (const v of f.values[dim] ?? []) parts.push(valueLabel(dim, v, t))
   if (f.minSeeders > 0) parts.push(t('tf.seedersMin', { n: f.minSeeders }))

@@ -42,6 +42,11 @@ pub const DEFAULT_PORT: u16 = 43300;
 const BODY_MAX: usize = 1024 * 1024;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Locks `m`, also after a panic in another holder (the data is still usable for everything here).
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Legacy `config.json` (installs before 1.0). Optional now: the token lives in the database, set by the
 /// first-run setup; an old file's token is copied over once.
 #[derive(Deserialize)]

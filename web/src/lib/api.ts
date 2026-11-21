@@ -39,7 +39,7 @@ export interface Details extends Item {
   recommendations: Item[]
 }
 
-export interface Episode {
+interface Episode {
   episode_number: number
   name: string
   overview: string
@@ -48,13 +48,13 @@ export interface Episode {
   runtime: number | null
 }
 
-export interface SeasonDetails {
+interface SeasonDetails {
   season_number: number
   name: string
   episodes: Episode[]
 }
 
-export interface Caps {
+interface Caps {
   sniffer: boolean
 }
 
@@ -113,7 +113,7 @@ export interface Settings {
   parallel: number
 }
 
-export interface BufferState {
+interface BufferState {
   variant: number
   from_seconds: number
   ahead_seconds: number
@@ -121,7 +121,7 @@ export interface BufferState {
   done: boolean
 }
 
-export interface Page {
+interface Page {
   results: Item[]
   page: number
   total_pages: number
@@ -135,7 +135,7 @@ export interface Home {
   top_rated_tv: Item[]
 }
 
-export interface Genre {
+interface Genre {
   id: number
   name: string
 }

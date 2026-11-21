@@ -12,7 +12,7 @@ import { FilterBar, FilterEmpty } from '../TorrentFilters'
 import { TorrentRow, VpnBadge, VpnNotice } from '../Torrents'
 
 /** The torrent group under the provider list. */
-export type TorrentGroup = {
+type TorrentGroup = {
   results: TorrentResult[]
   /** The whole answer (facets, counts) for the filter bar. */
   data: TorrentSearch | undefined

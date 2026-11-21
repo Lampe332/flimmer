@@ -50,7 +50,7 @@ type Props = {
  * A torrent file as /playinfo describes it. "direct": the file itself, seekable natively. "transcode": ffmpeg fMP4,
  * not seekable; the player reloads `play?t=` on a seek and adds that offset to the element's clock.
  */
-export type TorrentSource = {
+type TorrentSource = {
   id: string
   file: number
   mode: 'direct' | 'transcode'

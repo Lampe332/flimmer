@@ -1,6 +1,6 @@
-# Flimmer API (Phase 1–3)
+# Flimmer API
 
-Server: Rust (axum) on `http://127.0.0.1:43300`. All JSON. All TMDB texts in `config.language` (default `de-DE`).
+Server: Rust (axum) on `http://127.0.0.1:43300`. All JSON. TMDB texts in the `lang` of the call (see "Languages" below), else `de-DE`.
 Image fields are full URLs (`https://image.tmdb.org/t/p/w500/...` for posters, `.../w1280/...` for backdrops, `.../w300/...` for stills/profiles) or `null`.
 Errors: HTTP 4xx/5xx with `{ "error": "message" }`.
 
@@ -345,6 +345,7 @@ interface Decision { rule: string; title: string; season: number | null; episode
 | POST | `/api/torrents/start` | also takes `priority`. A new `download` waits for a free slot (`queued`); a `stream` starts at once and is never queued. Before it starts, the free space of the target drive is checked: too little → state `error` with the reason and one `failed` event |
 | PUT | `/api/torrents/:id/priority` | body `{ priority }` → `204`. Order of the queue: streams, then priority, then age |
 | GET | `/api/torrents/events?since=<id>` | `{ events: TorrentEvent[], last: number }`, oldest first, the newest 200 are kept (also over restarts). Poll with the last `last` |
+| GET | `/api/torrents/announce?info_hash=…` | internal: the tracker shim the torrent engine announces to (bencoded peers from the tunnel's trackers, DHT and incoming). Loopback requests without `Origin`, `Sec-Fetch-Site` or `Cookie` (the engine) need no session; everything else goes through the normal access check |
 | GET | `/api/torrents/:id/next?file=<i>` | the next episode's file in a season pack: `{ torrent_id, file, name, size, season, episode, selected, completed, url, playinfo }`; selects it for download when it is not chosen yet. `404` when there is none |
 | GET | `/api/torrents/local/:type/:id?s=&e=` | the same shape plus `state`: a known torrent that already holds this movie / episode. `404` when none does |
 | GET | `/api/torrents/:id/subtitle?file=<i>&track=<i>&t=<seconds>` | the subtitle track as WebVTT, cue times moved `t` seconds earlier (the stream's start). `415` for image subtitles, `404` for an unknown track. While the file is still downloading the cues arrive as the data does |

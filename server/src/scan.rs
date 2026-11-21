@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 use crate::{
+    lock,
     api::{self, AppState, Source},
     db::{Health, Outcome, Table, now_ms},
     error::{ApiError, ApiResult},
@@ -169,10 +170,6 @@ impl Scans {
     pub fn parallel(&self) -> usize {
         PARALLEL_MAX - lock(&self.parked).len()
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// `2026-11-20T18:04:05Z` from Unix milliseconds.

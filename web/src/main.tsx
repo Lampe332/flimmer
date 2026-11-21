@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@fontsource-variable/bricolage-grotesque/wdth.css'
 import '@fontsource-variable/instrument-sans'
 import './styles.css'
-import { subscribeLang } from './i18n'
+import { loadInitialLang, subscribeLang } from './i18n'
 import { ApiError } from './lib/api'
 import App from './App'
 
@@ -29,12 +29,15 @@ subscribeLang(() => {
 const root = document.getElementById('root')
 if (!root) throw new Error('#root is missing')
 
-createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </QueryClientProvider>
-  </StrictMode>,
+// The UI texts of the saved language come first; nothing is shown without them.
+void loadInitialLang().finally(() =>
+  createRoot(root).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </StrictMode>,
+  ),
 )

@@ -20,6 +20,7 @@ use tokio::{io::AsyncWriteExt, task::JoinHandle};
 use url::Url;
 
 use crate::{
+    lock,
     api::AppState,
     db::Table,
     error::{ApiError, ApiResult},
@@ -89,10 +90,6 @@ impl From<Upstream> for ApiError {
             Upstream::Blocked => ApiError::forbidden("this address is not allowed"),
         }
     }
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn range_header((off, len): ByteRange) -> String {

@@ -30,6 +30,7 @@ use tokio::sync::Notify;
 use url::{Host, Url};
 
 use crate::{
+    lock,
     api::AppState,
     db::{Db, Table, now_ms},
     error::{ApiError, ApiResult},
@@ -300,10 +301,6 @@ struct Fails {
 struct Bucket {
     tokens: f64,
     at: Instant,
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[derive(Debug, PartialEq, Eq)]

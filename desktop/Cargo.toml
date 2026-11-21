@@ -17,4 +17,4 @@ tauri = { version = "2", features = [] }
 tokio = { version = "1", features = ["sync", "time"] }
 url = "2"
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }

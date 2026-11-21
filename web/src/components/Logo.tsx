@@ -17,7 +17,7 @@ export function Mark({ size = 28, className }: { size?: number; className?: stri
 }
 
 /** Horizontal lockup, symbol plus wordmark. The i's tittle is the projector lamp. */
-export function Lockup({ height = 26 }: { height?: number }) {
+function Lockup({ height = 26 }: { height?: number }) {
   return (
     <svg
       className="lockup"

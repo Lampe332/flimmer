@@ -12,3 +12,11 @@ spike/lists/
 desktop/extensions/
 desktop/gen/
 tools/
+# local secrets, logs and build leftovers
+.env
+*.pem
+*.key
+*.conf
+*.log
+*.pdb
+*.tsbuildinfo
