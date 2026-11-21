@@ -54,11 +54,13 @@ const stack: Closer[] = []
  */
 export function pushBack(close: Closer): () => void {
   stack.push(close)
-  const marker = { ...(window.history.state ?? {}), flimmerSheet: stack.length }
+  const depth = stack.length
+  const marker = { ...(window.history.state ?? {}), flimmerSheet: depth }
   window.history.pushState(marker, '')
   let done = false
   const onPop = () => {
-    if (done) return
+    // a sheet stacked on top (a menu's sub page) was popped: this one's entry is still there
+    if (done || ((window.history.state as { flimmerSheet?: number } | null)?.flimmerSheet ?? 0) >= depth) return
     done = true
     window.removeEventListener('popstate', onPop)
     remove()
@@ -74,8 +76,19 @@ export function pushBack(close: Closer): () => void {
     done = true
     window.removeEventListener('popstate', onPop)
     remove()
-    if (window.history.state?.flimmerSheet) window.history.back()
+    if (window.history.state?.flimmerSheet) backSoon()
   }
+}
+
+/** Sheets closing together (a menu and its sub page) drop all their entries in one step. */
+let pendingBack = 0
+function backSoon() {
+  if (pendingBack++ > 0) return
+  queueMicrotask(() => {
+    const n = pendingBack
+    pendingBack = 0
+    window.history.go(-n)
+  })
 }
 
 declare global {

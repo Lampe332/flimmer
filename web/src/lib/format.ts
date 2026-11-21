@@ -161,7 +161,8 @@ export function trackLabel(track: { lang?: string | null; name?: string | null }
   rest = rest.replace(/^[\s\-–—:|·,]+|[\s\-–—:|·,]+$/g, '')
   // "(Latin America)" next to a name that already says the region.
   if (lang?.includes('(') && /^\(.*\)$/.test(rest)) rest = ''
-  const base = lang ? [lang, rest].filter(Boolean).join(' ') : rest || `${kind} ${index + 1}`
+  // the name says the language: just the name; else "Language · name"
+  const base = lang ? [lang, rest].filter(Boolean).join(lead ? ' ' : ' · ') : rest || `${kind} ${index + 1}`
   return base + tags
 }
 

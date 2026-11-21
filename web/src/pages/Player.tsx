@@ -407,6 +407,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                 startBody={pack ? { infohash: pack.hash } : activeTorrent && startBody(activeTorrent, 'stream')}
                 file={pack ? pack.file : (activeTorrent?.file_index ?? undefined)}
                 title={d?.title ?? activeTorrent?.release.title ?? ''}
+                backTo={`/titel/${type}/${id}`}
                 subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
                 startAt={resume.current || savedStart}
                 onTime={(t) => (resume.current = t)}
@@ -449,6 +450,7 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                 kind={active.kind}
                 variants={active.variants}
                 title={d?.title ?? ''}
+                backTo={`/titel/${type}/${id}`}
                 subtitle={isTv ? [epLabel, episode?.name].filter(Boolean).join(', ') : undefined}
                 startAt={resume.current || savedStart}
                 onTime={(t) => (resume.current = t)}

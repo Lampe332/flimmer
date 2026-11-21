@@ -30,7 +30,17 @@ interface Prefs {
   torrentFilter: TorrentFilter
   /** Torrent order: "fast" = starts soonest, "quality" = best release. */
   torrentMode: TorrentMode
+  /** Phone player: how the picture fills the screen, and the text subtitles' size and background. */
+  videoFit: VideoFit
+  subSize: SubSize
+  subBg: SubBg
 }
+export const VIDEO_FITS = ['contain', 'cover', 'fill'] as const
+export type VideoFit = (typeof VIDEO_FITS)[number]
+export const SUB_SIZES = ['s', 'm', 'l'] as const
+export type SubSize = (typeof SUB_SIZES)[number]
+export const SUB_BGS = ['none', 'dim', 'solid'] as const
+export type SubBg = (typeof SUB_BGS)[number]
 
 /** Facet dimensions of the torrent search (`docs/API.md`, Phase 6). */
 export const FILTER_DIMS = ['language', 'sub', 'res', 'source', 'codec', 'hdr', 'audio', 'channels', 'group'] as const
@@ -89,6 +99,9 @@ const DEFAULT_PREFS: Prefs = {
   tourDone: false,
   torrentFilter: EMPTY_FILTER,
   torrentMode: 'fast',
+  videoFit: 'contain',
+  subSize: 'm',
+  subBg: 'dim',
 }
 
 const STORE_KEY = 'flimmer.prefs'
@@ -121,6 +134,9 @@ function cleanPrefs(raw: unknown): Prefs {
     tourDone: bool(r.tourDone, d.tourDone),
     torrentFilter: cleanFilter(r.torrentFilter),
     torrentMode: oneOf(r.torrentMode, ['fast', 'quality'] as const, d.torrentMode),
+    videoFit: oneOf(r.videoFit, VIDEO_FITS, d.videoFit),
+    subSize: oneOf(r.subSize, SUB_SIZES, d.subSize),
+    subBg: oneOf(r.subBg, SUB_BGS, d.subBg),
   }
 }
 

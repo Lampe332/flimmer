@@ -91,6 +91,7 @@ function TorrentPlayView({ hash, file }: { hash: string; file: number | undefine
           startBody={{ infohash: hash }}
           file={file}
           title={title}
+          backTo={media ? `/titel/${media.type}/${media.id}` : '/downloads'}
           startAt={resume.current || savedStart}
           onTime={(x) => (resume.current = x)}
           onSave={onSave}

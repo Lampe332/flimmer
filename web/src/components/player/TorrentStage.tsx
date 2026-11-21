@@ -27,6 +27,8 @@ type Props = {
   next?: { label: string; name?: string; still?: string | null; go: () => void }
   /** Backdrop behind the waiting card. */
   backdrop?: string | null
+  /** Where the player's back button goes without app history (the title page). */
+  backTo?: string
 }
 
 /**
@@ -130,6 +132,7 @@ export default function TorrentStage(p: Props) {
         onHintDone={p.onHintDone}
         fallback={p.fallback}
         next={p.next}
+        backTo={p.backTo}
         torrent={{
           id: p.hash,
           file: play.data.file,

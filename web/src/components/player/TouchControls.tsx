@@ -24,6 +24,7 @@ import {
   readScreenBrightness,
   writeScreenBrightness,
 } from './phone/controls'
+import SettingsMenu from './phone/SettingsMenu'
 
 /**
  * The player's controls for a finger, after the phone player of Seanime Mobile (sizes and rules: ./phone/controls.ts):
@@ -77,6 +78,12 @@ type Props = {
   quality: Pick | null
   audio: Pick | null
   subs: Pick | null
+  /** Text subtitles exist / one is on (the delay and style entries). */
+  hasSubs: boolean
+  subOn: boolean
+  cancelNext?: () => void
+  /** Without app history the back button goes here (the title page), not home. */
+  backTo?: string
 }
 
 type Side = 'left' | 'right'
@@ -313,7 +320,7 @@ export default function TouchControls(p: Props) {
     if (p.fullscreen) p.toggleFullscreen()
     // came here from inside Flimmer (the router counts its entries): back to that page, else home
     else if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) window.history.back()
-    else window.location.assign('/')
+    else window.location.assign(p.backTo ?? '/')
   }
 
   // the sheet keeps its last content while it slides out
@@ -321,9 +328,8 @@ export default function TouchControls(p: Props) {
   const lastMenu = useRef(open)
   if (open) lastMenu.current = open
   const sheetMenu = open ?? lastMenu.current
-  const groups: Pick[] =
-    sheetMenu === 'settings' ? [p.audio, p.subs].filter((g): g is Pick => !!g) : sheetMenu && p[sheetMenu] ? [p[sheetMenu] as Pick] : []
-  const sheetTitle = sheetMenu === 'settings' ? t('settings.title') : (groups[0]?.title ?? '')
+  const groups: Pick[] = sheetMenu && sheetMenu !== 'settings' && p[sheetMenu] ? [p[sheetMenu] as Pick] : []
+  const sheetTitle = groups[0]?.title ?? ''
 
   return (
     <div
@@ -476,10 +482,9 @@ export default function TouchControls(p: Props) {
         </div>
       </div>
 
-      <Sheet open={!!open} onClose={() => p.setMenu(null)} title={sheetTitle} inline={p.fullscreen} className="vt-sheet">
+      <Sheet open={!!open && open !== 'settings'} onClose={() => p.setMenu(null)} title={sheetTitle} inline={p.fullscreen} className="vt-sheet">
         {groups.map((g) => (
           <div key={g.title} role="menu" aria-label={g.title}>
-            {groups.length > 1 && <p className="vt-sheet-head">{g.title}</p>}
             {g.options.map((o) => (
               <SheetOption
                 key={o.id}
@@ -495,6 +500,19 @@ export default function TouchControls(p: Props) {
           </div>
         ))}
       </Sheet>
+      <SettingsMenu
+        t={t}
+        open={open === 'settings'}
+        onClose={() => p.setMenu(null)}
+        panel={size.w > size.h}
+        inline={p.fullscreen}
+        media={p.media}
+        audio={p.audio}
+        subs={p.subs}
+        hasSubs={p.hasSubs}
+        subOn={p.subOn}
+        cancelNext={p.cancelNext}
+      />
     </div>
   )
 }

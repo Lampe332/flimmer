@@ -959,3 +959,181 @@
     right: auto;
   }
 }
+/* ---------------------------------------------------------------- phone player: settings menu */
+.vt-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-m);
+  color: var(--leinwand);
+  font-size: 0.95rem;
+  text-align: left;
+}
+.vt-menu-row:active,
+.vt-menu-back:active {
+  background: var(--rang);
+}
+.vt-menu-row:focus-visible,
+.vt-menu-back:focus-visible,
+.vt-step:focus-visible,
+.vt-chip:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: -2px;
+}
+.vt-menu-row-label {
+  flex: 1;
+  min-width: 0;
+}
+.vt-menu-row-value {
+  color: var(--dunst);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.vt-menu-row svg {
+  flex: none;
+  color: var(--dunst);
+}
+.vt-menu-tracks {
+  margin-top: 4px;
+  border-top: 1px solid var(--linie);
+}
+.vt-menu-back {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  margin-bottom: 4px;
+  padding: 0 12px 0 4px;
+  border-radius: var(--r-m);
+  color: var(--leinwand);
+  font: 700 1rem var(--display);
+  font-stretch: 88%;
+  text-align: left;
+}
+.vt-menu-tune {
+  display: grid;
+  gap: 16px;
+  padding: 4px 12px 8px;
+}
+.vt-stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vt-step {
+  flex: none;
+  min-width: 52px;
+  height: 52px;
+  padding: 0 14px;
+  border-radius: var(--r-m);
+  background: var(--rang);
+  color: var(--leinwand);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.vt-step.is-wide {
+  font-size: 0.9rem;
+}
+.vt-step-value {
+  flex: 1;
+  text-align: center;
+  font: 700 1.6rem var(--display);
+  font-variant-numeric: tabular-nums;
+  color: var(--lampe-hell);
+}
+.vt-range {
+  width: 100%;
+  accent-color: var(--lampe);
+}
+.vt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vt-chip {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--linie-stark);
+  color: var(--leinwand);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.vt-chip[aria-pressed="true"] {
+  background: var(--lampe);
+  box-shadow: none;
+  color: var(--saal);
+  font-weight: 700;
+}
+.vt-chip:disabled {
+  opacity: 0.4;
+}
+/* sideways: a panel 4 px under the top bar, centred, at most 800 wide; settings and tracks side by side */
+.sheet.vt-menu.is-panel {
+  justify-content: flex-start;
+  padding-top: calc(var(--vt-pt, 8px) + var(--vt-btn, 44px) + 4px);
+}
+.sheet.is-inline.vt-menu.is-panel .sheet-panel {
+  width: calc(100% - 2 * var(--vt-px, 16px));
+  max-width: 800px;
+  max-height: calc(100% - 8px);
+  border-radius: var(--r-l);
+  box-shadow: 0 0 0 1px var(--linie-stark), 0 12px 40px rgb(0 0 0 / 0.45);
+  padding-bottom: 0;
+  animation: vt-menu-drop 0.18s var(--ease-out);
+  transition: transform 0.2s var(--ease-out), opacity 0.2s ease;
+}
+.sheet.vt-menu.is-panel.is-leaving .sheet-panel {
+  transform: translateY(-8px);
+  opacity: 0;
+}
+.vt-menu.is-panel .sheet-handle {
+  display: none;
+}
+.vt-menu.is-panel .sheet-grip {
+  padding-top: 12px;
+}
+.vt-menu.is-panel .vt-menu-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+  align-items: start;
+}
+.vt-menu.is-panel .vt-menu-tracks {
+  margin-top: 0;
+  border-top: 0;
+}
+.vt-menu.is-panel .vt-menu-tracks .vt-sheet-head:first-child {
+  padding-top: 4px;
+}
+@keyframes vt-menu-drop {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet.is-inline.vt-menu.is-panel .sheet-panel {
+    animation-duration: 0.01ms;
+    transition: none;
+  }
+}
+/* text subtitles: size and background from the menu (the attributes exist only with the phone controls) */
+.vp-video[data-sub-size="s"]::cue {
+  font-size: 80%;
+}
+.vp-video[data-sub-size="l"]::cue {
+  font-size: 130%;
+}
+.vp-video[data-sub-bg="none"]::cue {
+  background: transparent;
+  text-shadow: 0 0 4px #000, 0 1px 2px #000;
+}
+.vp-video[data-sub-bg="solid"]::cue {
+  background: #000;
+}

@@ -37,6 +37,8 @@ type Props = {
   /** The upstream stopped serving this stream (HTTP 410). */
   onExpired: () => void
   next?: { label: string; name?: string; still?: string | null; go: () => void }
+  /** Where the back button goes without app history (the title page). */
+  backTo?: string
   /** Called with the position to remember: every 10 s while playing, on pause, seek, end and when leaving. */
   onSave?: (seconds: number, duration: number) => void
   /** Saved position this playback resumed from; shows "Fortgesetzt bei …" with a restart button. */
@@ -121,6 +123,8 @@ const IDLE_MS = 2800
 const SAVE_EVERY_MS = 10_000
 /** Credits shortcut: offer the next episode this many seconds before the end. */
 const UP_NEXT_S = 30
+/** Phone player: the countdown starts this many seconds before the end (Seanime Mobile AUTO_NEXT_SECONDS). */
+const PHONE_NEXT_S = 5
 const HINT_MS = 8000
 /** A second click within this time is a double click (fullscreen), so the first one must not toggle playback. */
 const DBL_MS = 240
@@ -139,6 +143,7 @@ export default function VideoPlayer({
   onTime,
   onExpired,
   next,
+  backTo,
   onSave,
   resumeHint,
   onHintDone,
@@ -863,10 +868,11 @@ export default function VideoPlayer({
   }
 
   // ---- up next: countdown card in the last 30 s and at the end ----
-  const { autoNext, autoNextSeconds: countdown } = usePrefs()
+  const { autoNext, autoNextSeconds: prefCountdown } = usePrefs()
+  const countdown = coarse ? PHONE_NEXT_S : prefCountdown
   const [upNextOff, setUpNextOff] = useState(false)
   const [count, setCount] = useState(countdown)
-  const nearEnd = !!next && started && !fatal && duration > 60 && (ended || duration - time <= UP_NEXT_S)
+  const nearEnd = !!next && started && !fatal && duration > 60 && (ended || duration - time <= (coarse ? PHONE_NEXT_S : UP_NEXT_S))
   const upNext = nearEnd && !upNextOff
   // "Nächste Folge automatisch" off: the card still offers the next episode, it just does not count down.
   const ticking = upNext && autoNext && (playing || ended) && scrub === null
@@ -917,8 +923,8 @@ export default function VideoPlayer({
         : t('vp.auto')
       : (levels.find((l) => l.id === level)?.label ?? t('vp.auto'))
   const volumeShown = vol.muted ? 0 : vol.volume
-  const subLabels = uniqueLabels(subs.map((s, i) => trackLabel(s, i, t('scan.subs'))))
-  const audioLabels = uniqueLabels(audios.map((a, i) => trackLabel(a, i, t('scan.audio'))))
+  const subLabels = uniqueLabels(subs.map((s, i) => trackLabel(s, i, coarse ? t('m.track') : t('scan.subs'))))
+  const audioLabels = uniqueLabels(audios.map((a, i) => trackLabel(a, i, coarse ? t('m.track') : t('scan.audio'))))
   const subOptions: Option[] = subs.map((s, i) => ({ id: s.id, label: subLabels[i] ?? '' }))
   const audioOptions: Option[] = audios.map((a, i) => ({ id: a.id, label: audioLabels[i] ?? '' }))
   const withKey = (label: string, key: string) => t('common.withKey', { label, key })
@@ -1114,6 +1120,10 @@ export default function VideoPlayer({
           media={() => video.current}
           menu={menu}
           setMenu={setMenu}
+          backTo={backTo}
+          hasSubs={subs.length > 0}
+          subOn={sub >= 0}
+          cancelNext={() => setUpNextOff(true)}
           subs={{
             title: t('scan.subs'),
             icon: 'subtitles',
