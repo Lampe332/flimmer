@@ -34,6 +34,7 @@ export const en: Dict = {
   'settings.languageHint': 'Applies to menus and texts and to the movie data from TMDB: titles, overviews, episodes and genres.',
 
   'footer.before': 'Flimmer runs locally on your computer. Titles, images and texts come from',
+  'footer.beforeApp': 'Flimmer runs locally on your device. Titles, images and texts come from',
   'footer.after': '; this product is not endorsed or certified by TMDB.',
 
   'err.serverDown': 'Server not reachable',
@@ -288,6 +289,7 @@ export const en: Dict = {
   'vp.prefetched': 'Preloaded: {n} min',
   'vp.prefetching': 'Preloading: {n} min',
   'vp.off': 'Off',
+  'vp.noSubs': 'No subtitles',
   'vp.quality': 'Quality',
   'vp.auto': 'Auto',
   'vp.autoWith': 'Auto, {level}',

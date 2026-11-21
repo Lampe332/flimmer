@@ -15,7 +15,9 @@ import Sheet, { SheetOption } from '../Sheet'
  */
 
 export const TOUCH_HIDE_MS = 5000
-const DOUBLE_TAP_MS = 280
+const DOUBLE_TAP_MS = 300
+/** The second tap of a double tap lands this close to the first (px). */
+const TAP_NEAR = 40
 const SEEK_STEP = 10
 const SLOP = 10
 
@@ -57,12 +59,22 @@ type Props = {
 }
 
 type Side = 'left' | 'right'
+type LastTap = { side: Side; at: number; x: number; y: number; wasShown: boolean }
+
+/** `next` (finger down at `downAt`) continues a double tap after `last` (released at `last.at`). */
+function isDoubleTap(last: LastTap, next: { side: Side; x: number; y: number; downAt: number }): boolean {
+  return (
+    next.side === last.side &&
+    next.downAt - last.at < DOUBLE_TAP_MS &&
+    Math.hypot(next.x - last.x, next.y - last.y) < TAP_NEAR
+  )
+}
 
 export default function TouchControls(p: Props) {
   const { t } = p
   const box = useRef<HTMLDivElement>(null)
   const tap = useRef<{ x: number; y: number; at: number; id: number } | null>(null)
-  const lastTap = useRef<{ side: Side; at: number; wasShown: boolean } | null>(null)
+  const lastTap = useRef<LastTap | null>(null)
   const [ripple, setRipple] = useState<{ side: Side; total: number; key: number } | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [remaining, setRemaining] = useState(false)
@@ -79,8 +91,12 @@ export default function TouchControls(p: Props) {
   }, [message])
 
   // ---- taps on the picture ----
+  // Pointer events only (no click/dblclick: a finger's dblclick is unreliable in the WebView, and click comes late).
+  // A tap counts as the second of a double tap when its finger goes down within DOUBLE_TAP_MS of the last tap's
+  // release and within TAP_NEAR px of it (Android's own rule); the first tap still toggles the bars at once,
+  // the second puts them back as they were, so nothing is swallowed.
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!e.isPrimary) return
+    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return
     tap.current = { x: e.clientX, y: e.clientY, at: e.timeStamp, id: e.pointerId }
   }
   const onUp = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -92,17 +108,17 @@ export default function TouchControls(p: Props) {
     const side: Side = e.clientX - r.left < r.width / 2 ? 'left' : 'right'
     const last = lastTap.current
     const now = e.timeStamp
-    if (last && last.side === side && now - last.at < DOUBLE_TAP_MS) {
+    if (last && isDoubleTap(last, { side, x: d.x, y: d.y, downAt: d.at })) {
       // double tap (and every further quick tap): seek, the bars stay as they were before the first tap
       const step = side === 'left' ? -SEEK_STEP : SEEK_STEP
       p.seekTo(p.nowAt() + step)
       setRipple((r0) => ({ side, total: r0 && r0.side === side ? r0.total + SEEK_STEP : SEEK_STEP, key: now }))
       if (last.wasShown) p.show()
       else p.hide()
-      lastTap.current = { side, at: now, wasShown: last.wasShown }
+      lastTap.current = { side, at: now, x: e.clientX, y: e.clientY, wasShown: last.wasShown }
       return
     }
-    lastTap.current = { side, at: now, wasShown: p.shown }
+    lastTap.current = { side, at: now, x: e.clientX, y: e.clientY, wasShown: p.shown }
     if (p.shown) p.hide()
     else p.show()
   }

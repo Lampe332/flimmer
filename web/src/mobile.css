@@ -340,6 +340,9 @@
   position: absolute;
   z-index: 5;
 }
+.sheet.is-inline .sheet-panel {
+  max-height: min(85%, 560px);
+}
 .vt-sheet {
   color: var(--leinwand);
 }
@@ -390,6 +393,7 @@
   font-stretch: 88%;
 }
 .sheet-body {
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 8px 12px;

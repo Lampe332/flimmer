@@ -130,10 +130,34 @@ fn web_service(root: &Path) -> Router {
     let dist = root.join("web").join("dist");
     let index = dist.join("index.html");
     if index.is_file() {
-        Router::new().fallback_service(ServeDir::new(&dist).fallback(ServeFile::new(index)))
+        Router::new()
+            .fallback_service(ServeDir::new(&dist).fallback(ServeFile::new(index)))
+            .layer(axum::middleware::from_fn(web_cache_headers))
     } else {
         Router::new().fallback(|| async { "Flimmer UI not built yet (run npm run build in web/)" })
     }
+}
+
+/// The cache rule for a UI path: Vite's hashed `/assets/` files never change, everything else (index.html, SPA
+/// fallback, icons) is revalidated so an updated app never runs an old page against new files.
+fn web_cache_control(path: &str) -> &'static str {
+    if path.starts_with("/assets/") { "public, max-age=31536000, immutable" } else { "no-cache" }
+}
+
+async fn web_cache_headers(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let rule = web_cache_control(req.uri().path());
+    let mut res = next.run(req).await;
+    // A missing asset falls back to index.html: that must not be cached for a year.
+    let rule = if res.status().is_success() && !is_html(&res) { rule } else { "no-cache" };
+    res.headers_mut().insert(axum::http::header::CACHE_CONTROL, axum::http::HeaderValue::from_static(rule));
+    res
+}
+
+fn is_html(res: &axum::response::Response) -> bool {
+    res.headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("text/html"))
 }
 
 /// Loads config and data, cleans old cache and binds `127.0.0.1:port`.
@@ -251,5 +275,18 @@ impl Server {
             .map_err(|e| format!("server error: {e}"));
         lan.abort();
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_cache_control;
+
+    #[test]
+    fn hashed_assets_are_immutable_and_pages_revalidate() {
+        assert_eq!(web_cache_control("/assets/index-abc123.js"), "public, max-age=31536000, immutable");
+        assert_eq!(web_cache_control("/"), "no-cache");
+        assert_eq!(web_cache_control("/index.html"), "no-cache");
+        assert_eq!(web_cache_control("/library/42"), "no-cache");
     }
 }

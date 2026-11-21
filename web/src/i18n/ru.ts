@@ -31,6 +31,7 @@ export const ru: Dict = {
   'settings.languageHint': 'Меняет меню и тексты, а ещё данные из TMDB: названия, описания, серии и жанры.',
 
   'footer.before': 'Flimmer работает локально на твоём компьютере. Названия, картинки и тексты берутся из',
+  'footer.beforeApp': 'Flimmer работает локально на твоём устройстве. Названия, картинки и тексты берутся из',
   'footer.after': '; приложение не поддерживается и не сертифицировано TMDB.',
 
   'err.serverDown': 'Сервер недоступен',
@@ -285,6 +286,7 @@ export const ru: Dict = {
   'vp.prefetched': 'Загружено: {n} мин',
   'vp.prefetching': 'Загружаем: {n} мин',
   'vp.off': 'Выкл.',
+  'vp.noSubs': 'Субтитров нет',
   'vp.quality': 'Качество',
   'vp.auto': 'Авто',
   'vp.autoWith': 'Авто, {level}',

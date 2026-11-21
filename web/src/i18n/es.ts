@@ -31,6 +31,7 @@ export const es: Dict = {
   'settings.languageHint': 'Cambia los menús y textos, y también los datos de TMDB: títulos, sinopsis, episodios y géneros.',
 
   'footer.before': 'Flimmer funciona en local en tu ordenador. Los títulos, imágenes y textos vienen de',
+  'footer.beforeApp': 'Flimmer funciona en local en tu dispositivo. Los títulos, imágenes y textos vienen de',
   'footer.after': '; este producto no está respaldado ni certificado por TMDB.',
 
   'err.serverDown': 'Servidor no disponible',
@@ -285,6 +286,7 @@ export const es: Dict = {
   'vp.prefetched': 'Precargado: {n} min',
   'vp.prefetching': 'Precargando: {n} min',
   'vp.off': 'Desactivados',
+  'vp.noSubs': 'Sin subtítulos',
   'vp.quality': 'Calidad',
   'vp.auto': 'Auto',
   'vp.autoWith': 'Auto, {level}',

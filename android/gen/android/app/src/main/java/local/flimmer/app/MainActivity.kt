@@ -71,11 +71,25 @@ class MainActivity : TauriActivity() {
 
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    clearCacheAfterUpdate(webView)
     // After the WebView has its own chrome client (file picker, dialogs): wrap it to add real fullscreen.
     webView.post {
       val inner = webView.webChromeClient
       if (inner != null && inner !is FullscreenChrome) webView.webChromeClient = FullscreenChrome(inner)
     }
+  }
+
+  /** First start after an install or update: drop the WebView's HTTP cache (old UI files). Cookies and storage stay. */
+  private fun clearCacheAfterUpdate(webView: WebView) {
+    val installed = try {
+      packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+    } catch (e: Exception) {
+      return
+    }
+    val prefs = getSharedPreferences("flimmer", MODE_PRIVATE)
+    if (prefs.getLong("webCacheFor", 0L) == installed) return
+    webView.clearCache(true)
+    prefs.edit().putLong("webCacheFor", installed).apply()
   }
 
   private fun enterFullscreen(view: View, callback: WebChromeClient.CustomViewCallback) {

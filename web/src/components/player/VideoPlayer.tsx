@@ -1111,7 +1111,14 @@ export default function VideoPlayer({
           toggleMute={toggleMute}
           menu={menu}
           setMenu={setMenu}
-          subs={subs.length > 0 ? { title: t('scan.subs'), icon: 'subtitles', value: sub, options: [{ id: -1, label: t('vp.off') }, ...subOptions], onPick: pickSub } : null}
+          subs={{
+            title: t('scan.subs'),
+            icon: 'subtitles',
+            value: sub,
+            // always reachable: without tracks the sheet says so instead of the button missing
+            options: subs.length > 0 ? [{ id: -1, label: t('vp.off') }, ...subOptions] : [{ id: -1, label: t('vp.noSubs') }],
+            onPick: subs.length > 0 ? pickSub : () => undefined,
+          }}
           audio={audios.length > 1 ? { title: t('scan.audio'), icon: 'audio', value: audio, options: audioOptions, onPick: pickAudio } : null}
           quality={
             levels.length > 0

@@ -31,6 +31,7 @@ export const zh: Dict = {
   'settings.languageHint': '菜单和文字会切换，TMDB 的数据也会切换：片名、简介、分集和类型。',
 
   'footer.before': 'Flimmer 在你的电脑上本地运行。片名、图片和文字来自',
+  'footer.beforeApp': 'Flimmer 在你的设备上本地运行。片名、图片和文字来自',
   'footer.after': '。本产品未获 TMDB 认可或认证。',
 
   'err.serverDown': '无法连接服务器',
@@ -281,6 +282,7 @@ export const zh: Dict = {
   'vp.prefetched': '已预加载：{n} 分钟',
   'vp.prefetching': '预加载中：{n} 分钟',
   'vp.off': '关闭',
+  'vp.noSubs': '没有字幕',
   'vp.quality': '画质',
   'vp.auto': '自动',
   'vp.autoWith': '自动，{level}',

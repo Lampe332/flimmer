@@ -31,6 +31,7 @@ export const ko: Dict = {
   'settings.languageHint': '메뉴와 문구, 그리고 TMDB 데이터(제목, 줄거리, 에피소드, 장르)가 바뀝니다.',
 
   'footer.before': 'Flimmer는 내 컴퓨터에서 로컬로 실행됩니다. 제목, 이미지, 문구 출처:',
+  'footer.beforeApp': 'Flimmer는 내 기기에서 로컬로 실행됩니다. 제목, 이미지, 문구 출처:',
   'footer.after': '. 이 제품은 TMDB의 보증이나 인증을 받지 않았습니다.',
 
   'err.serverDown': '서버에 연결할 수 없습니다',
@@ -282,6 +283,7 @@ export const ko: Dict = {
   'vp.prefetched': '미리 받음: {n}분',
   'vp.prefetching': '미리 받는 중: {n}분',
   'vp.off': '끔',
+  'vp.noSubs': '자막 없음',
   'vp.quality': '화질',
   'vp.auto': '자동',
   'vp.autoWith': '자동, {level}',

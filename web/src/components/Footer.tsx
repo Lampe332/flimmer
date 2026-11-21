@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { useI18n } from '../i18n'
+import { IS_ANDROID_APP } from '../lib/platform'
 import { Mark } from './Logo'
 
 export default function Footer() {
@@ -11,7 +12,7 @@ export default function Footer() {
           <Mark size={22} />
         </Link>
         <p className="footer-note">
-          {t('footer.before')}{' '}
+          {t(IS_ANDROID_APP ? 'footer.beforeApp' : 'footer.before')}{' '}
           <a href="https://www.themoviedb.org/" target="_blank" rel="noreferrer noopener">
             TMDB
           </a>

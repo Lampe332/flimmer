@@ -31,6 +31,7 @@ export const ja: Dict = {
   'settings.languageHint': 'メニューと文章のほか、TMDB のデータ（タイトル、あらすじ、エピソード、ジャンル）も切り替わります。',
 
   'footer.before': 'Flimmer はあなたのパソコンの中で動きます。タイトル、画像、文章の提供元は',
+  'footer.beforeApp': 'Flimmer はあなたの端末の中で動きます。タイトル、画像、文章の提供元は',
   'footer.after': 'です。本製品は TMDB の承認や認定を受けていません。',
 
   'err.serverDown': 'サーバーに接続できません',
@@ -282,6 +283,7 @@ export const ja: Dict = {
   'vp.prefetched': '先読み済み：{n}分',
   'vp.prefetching': '先読み中：{n}分',
   'vp.off': 'オフ',
+  'vp.noSubs': '字幕はありません',
   'vp.quality': '画質',
   'vp.auto': '自動',
   'vp.autoWith': '自動、{level}',

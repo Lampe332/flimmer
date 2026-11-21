@@ -31,6 +31,7 @@ export const tr: Dict = {
   'settings.languageHint': 'Menüleri ve metinleri, ayrıca TMDB verilerini değiştirir: adlar, özetler, bölümler ve türler.',
 
   'footer.before': 'Flimmer bilgisayarında yerel olarak çalışır. Adlar, görseller ve metinler şuradan gelir:',
+  'footer.beforeApp': 'Flimmer cihazında yerel olarak çalışır. Adlar, görseller ve metinler şuradan gelir:',
   'footer.after': '. Bu ürün TMDB tarafından desteklenmez veya onaylanmaz.',
 
   'err.serverDown': 'Sunucuya ulaşılamıyor',
@@ -284,6 +285,7 @@ export const tr: Dict = {
   'vp.prefetched': 'Yüklendi: {n} dk',
   'vp.prefetching': 'Önden yükleniyor: {n} dk',
   'vp.off': 'Kapalı',
+  'vp.noSubs': 'Altyazı yok',
   'vp.quality': 'Kalite',
   'vp.auto': 'Otomatik',
   'vp.autoWith': 'Otomatik, {level}',

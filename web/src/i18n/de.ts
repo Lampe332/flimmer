@@ -32,6 +32,7 @@ export const de = {
   'settings.languageHint': 'Gilt für Menüs und Texte und für die Filmdaten von TMDB: Titel, Beschreibungen, Folgen und Genres.',
 
   'footer.before': 'Flimmer läuft lokal auf deinem Rechner. Titel, Bilder und Texte kommen von',
+  'footer.beforeApp': 'Flimmer läuft lokal auf deinem Gerät. Titel, Bilder und Texte kommen von',
   'footer.after': '; die Anwendung wird von TMDB weder unterstützt noch zertifiziert.',
 
   'err.serverDown': 'Server nicht erreichbar',
@@ -286,6 +287,7 @@ export const de = {
   'vp.prefetched': 'Vorgeladen: {n} Min.',
   'vp.prefetching': 'Lädt vor: {n} Min.',
   'vp.off': 'Aus',
+  'vp.noSubs': 'Keine Untertitel',
   'vp.quality': 'Qualität',
   'vp.auto': 'Auto',
   'vp.autoWith': 'Auto, {level}',
