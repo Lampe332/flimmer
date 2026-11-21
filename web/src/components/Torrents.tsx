@@ -37,6 +37,14 @@ type RowProps = {
   onDownload?: () => void
 }
 
+/** Release name without the advertising prefix many uploads carry ("www.UIndex.org - ", "[ www.site.com ] "). */
+function cleanName(name: string): string {
+  const cleaned = name
+    .replace(/^\s*\[\s*(www[\s.])?[\w-]+([\s.][\w-]+)*[\s.](org|com|net|to|cc|me|info|io|tv|ws|nl)\s*\]\s*[-–]?\s*/i, '')
+    .replace(/^\s*(www[\s.])?[\w-]+[\s.](org|com|net|to|cc|me|info|io|tv|ws|nl)\s+[-–]\s+/i, '')
+  return cleaned.trim() || name
+}
+
 /** One torrent: resolution, size, seeders, then small chips for language, source, HDR, codec; details fold out. */
 export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onDownload }: RowProps) {
   const { t } = useI18n()
@@ -76,7 +84,7 @@ export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onD
         </span>
       </span>
       <span className="trow-name" title={r.name}>
-        {r.name}
+        {cleanName(r.name)}
       </span>
       <span className="trow-chips">
         {chips.map((c) => (

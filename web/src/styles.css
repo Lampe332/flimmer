@@ -3127,6 +3127,9 @@ button:disabled {
 
 .trow {
   display: grid;
+  /* minmax(0, 1fr): long release names must shrink (ellipsis) instead of pushing under the buttons */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   border: 1px solid transparent;
   border-radius: var(--r-m);
   background: rgb(255 255 255 / 0.04);
