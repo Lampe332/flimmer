@@ -28,3 +28,8 @@ docs/android-shots/
 *.log
 *.pdb
 *.tsbuildinfo
+
+# local dev files, not for the public repo
+.claude/
+spike/logs/
+spike/shots/
