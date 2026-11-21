@@ -893,3 +893,11 @@
     height: 44px;
   }
 }
+
+/* VPN popover: on phones the badge sits at the left under the title, so open to the right */
+@media (max-width: 760px) {
+  .vpn-pop {
+    left: 0;
+    right: auto;
+  }
+}

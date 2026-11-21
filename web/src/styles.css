@@ -140,7 +140,8 @@ button:disabled {
   padding-top: var(--header-h);
 }
 .route {
-  animation: route-in 0.32s var(--ease-out) both;
+  /* backwards, not both: a kept transform would make .route the containing block of fixed children (phone player) */
+  animation: route-in 0.32s var(--ease-out) backwards;
 }
 @keyframes route-in {
   from {
