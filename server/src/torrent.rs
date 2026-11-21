@@ -812,6 +812,10 @@ pub fn queue_order(list: &mut [(bool, i32, i64, usize)]) {
 pub fn spawn_manager(st: Arc<AppState>) {
     for data in st.db.blob_all(Table::Torrents).unwrap_or_default() {
         if let Ok(meta) = serde_json::from_str::<Meta>(&data) {
+            // Downloads finished before this cleanup existed still have their empty unchosen files.
+            if meta.completed {
+                remove_empty_leftovers(&meta);
+            }
             st.torrents.entries.lock().unwrap().insert(meta.id.clone(), Entry::new(meta));
         }
     }
