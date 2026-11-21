@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createElement, lazy, Suspense, type ComponentType, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -14,16 +14,33 @@ import { useSetup } from './lib/setup'
 import Home from './pages/Home'
 import Pair, { SetupOnPc } from './pages/Pair'
 
-const Browse = lazy(() => import('./pages/Browse'))
-const Search = lazy(() => import('./pages/Search'))
-const Detail = lazy(() => import('./pages/Detail'))
+/**
+ * A lazy page that renders straight away once `preload` has fetched it. A plain `lazy` still suspends on its first
+ * render even when the chunk is cached, and React holds that fallback for about 300 ms.
+ */
+function page<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
+  let loaded: ComponentType<P> | undefined
+  let pending: Promise<{ default: ComponentType<P> }> | undefined
+  const preload = () =>
+    (pending ??= load().then((m) => {
+      loaded = m.default
+      return m
+    }))
+  const Lazy = lazy(preload)
+  const Page = (props: P) => (loaded ? createElement(loaded, props) : createElement(Lazy, props))
+  return Object.assign(Page, { preload })
+}
+
+const Browse = page(() => import('./pages/Browse'))
+const Search = page(() => import('./pages/Search'))
+const Detail = page(() => import('./pages/Detail'))
 const Player = lazy(() => import('./pages/Player'))
-const Watchlist = lazy(() => import('./pages/Watchlist'))
-const History = lazy(() => import('./pages/History'))
+const Watchlist = page(() => import('./pages/Watchlist'))
+const History = page(() => import('./pages/History'))
 const NotFound = lazy(() => import('./pages/NotFound'))
-const Downloads = lazy(() => import('./pages/Downloads'))
+const Downloads = page(() => import('./pages/Downloads'))
 const TorrentPlay = lazy(() => import('./pages/TorrentPlay'))
-const Settings = lazy(() => import('./pages/Settings'))
+const Settings = page(() => import('./pages/Settings'))
 const Help = lazy(() => import('./pages/Help'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
 
@@ -31,15 +48,12 @@ const Onboarding = lazy(() => import('./pages/Onboarding'))
 function usePrefetchPages() {
   useEffect(() => {
     const load = () => {
-      void import('./pages/Browse')
-      void import('./pages/Watchlist')
-      void import('./pages/History')
-      void import('./pages/Downloads')
-      void import('./pages/Search')
-      void import('./pages/Detail')
-      void import('./pages/Settings')
+      for (const p of [Browse, Watchlist, History, Downloads, Search, Detail, Settings]) void p.preload()
     }
-    const idle = window.requestIdleCallback ?? ((fn: () => void) => window.setTimeout(fn, 1500))
+    // The timeout makes sure it runs even when the browser never reports idle time (background tab, busy phone).
+    const idle = window.requestIdleCallback
+      ? (fn: () => void) => window.requestIdleCallback(fn, { timeout: 2000 })
+      : (fn: () => void) => window.setTimeout(fn, 1500)
     const id = idle(load)
     return () => (window.cancelIdleCallback ?? window.clearTimeout)(id)
   }, [])

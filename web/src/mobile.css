@@ -758,3 +758,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* A settings page already names its section in the bar above, so the first card does not repeat it. */
+.mpage-bar + .set-card > .set-title {
+  display: none;
+}

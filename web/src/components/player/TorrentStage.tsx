@@ -39,11 +39,19 @@ export default function TorrentStage(p: Props) {
   const start = useMutation({ mutationFn: torrentApi.start, onSuccess: () => refreshTorrents(qc) })
   const startBody = useRef(p.startBody)
   const startTorrent = start.mutate
+  const list = useTorrents()
+  // A file that is already complete on disk plays as it is: no start, so it never needs the VPN.
+  const listed = list.data?.torrents.find((x) => x.id.toLowerCase() === p.hash.toLowerCase())
+  const done =
+    listed?.state === 'completed' &&
+    (p.file === undefined || listed.files.some((f) => f.index === p.file && f.size > 0 && f.downloaded >= f.size))
+  const decided = list.isFetched
   useEffect(() => {
-    if (startBody.current) startTorrent(startBody.current)
-  }, [p.hash, startTorrent])
+    if (startBody.current && decided && !done) startTorrent(startBody.current)
+    // `done` only decides the first time; a stream that finishes while playing is not started again.
+  }, [p.hash, startTorrent, decided])
 
-  const begun = !p.startBody || start.isSuccess
+  const begun = !p.startBody || done || start.isSuccess
   const info = useQuery({
     queryKey: ['torrent', p.hash],
     queryFn: () => torrentApi.get(p.hash),
@@ -51,7 +59,6 @@ export default function TorrentStage(p: Props) {
     refetchInterval: (q) => (q.state.data?.state === 'completed' ? 10_000 : 1000),
     retry: false,
   })
-  const list = useTorrents()
   const vpn = list.data?.vpn
   const tx = info.data ?? start.data
   const hasFiles = (tx?.files.length ?? 0) > 0
