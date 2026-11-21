@@ -5,7 +5,10 @@ import AutoRules from '../components/AutoRules'
 import Icon from '../components/Icon'
 import { VpnImport } from '../components/SetupParts'
 import { EmptyState, ErrorState, PageLoader } from '../components/States'
-import { FilterBar, FilterEmpty, useTorrentFilter } from '../components/TorrentFilters'
+import { activeCount, FilterBar, FilterEmpty, useTorrentFilter } from '../components/TorrentFilters'
+import Sheet from '../components/Sheet'
+import { useIsPhone } from '../lib/platform'
+import { EMPTY_FILTER } from '../lib/prefs'
 import { DirectSwitch, QueueFields } from '../components/TorrentSettingsParts'
 import { NeedsVpn, TorrentRow, VpnBadge, VpnNotice } from '../components/Torrents'
 import { useI18n, type Key } from '../i18n'
@@ -563,6 +566,10 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
     const cmp = by[sort]
     return cmp ? [...list].sort(cmp) : list
   }, [res.data, cat, sort])
+  // Phone: sources, category, order and filters wait behind one "Filter" button, the hits start right below.
+  const phone = useIsPhone()
+  const [sheet, setSheet] = useState(false)
+  const picked = activeCount(tf.filter) + Number(cat !== 'all') + Number(sort !== 'best')
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -582,29 +589,7 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
     { id: 'size', label: 'ts.sortSize' },
   ]
 
-  return (
-    <div className="ts">
-      <form className="ts-form" role="search" onSubmit={submit}>
-        <span className="ts-field">
-          <Icon name="search" size={18} />
-          <input
-            type="search"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={t('ts.placeholder')}
-            aria-label={t('ts.placeholder')}
-            autoComplete="off"
-            spellCheck={false}
-            enterKeyHint="search"
-          />
-        </span>
-        <button type="submit" className="btn btn-primary" disabled={draft.trim().length < 2}>
-          {t('ts.go')}
-        </button>
-      </form>
-      <p className="field-hint ts-hint">{t('ts.hint')}</p>
-
-      {q.length >= 2 && (
+  const tools = (
         <div className="ts-tools">
           <div className="seg ts-cats" role="radiogroup" aria-label={t('ts.category')}>
             {CATS.map((c) => (
@@ -627,7 +612,31 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
             </span>
           </label>
         </div>
-      )}
+  )
+
+  return (
+    <div className="ts">
+      <form className="ts-form" role="search" onSubmit={submit}>
+        <span className="ts-field">
+          <Icon name="search" size={18} />
+          <input
+            type="search"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t('ts.placeholder')}
+            aria-label={t('ts.placeholder')}
+            autoComplete="off"
+            spellCheck={false}
+            enterKeyHint="search"
+          />
+        </span>
+        <button type="submit" className="btn btn-primary" disabled={draft.trim().length < 2}>
+          {t('ts.go')}
+        </button>
+      </form>
+      {!phone && <p className="field-hint ts-hint">{t('ts.hint')}</p>}
+
+      {q.length >= 2 && !phone && tools}
 
       {q.length < 2 ? (
         <EmptyState icon="search" title={t('ts.emptyTitle')} text={t('ts.emptyText')} />
@@ -640,6 +649,55 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
         </div>
       ) : (
         <>
+          {phone ? (
+            <div className="ts-bar">
+              <p className="ts-count" role="status">
+                {res.isPlaceholderData && <span className="bars" aria-hidden="true" />}
+                {t('tor.count', { n: shown.length })}
+              </p>
+              <button
+                type="button"
+                className={`tf-toggle${picked > 0 ? ' has-active' : ''}`}
+                aria-haspopup="dialog"
+                aria-expanded={sheet}
+                onClick={() => setSheet(true)}
+              >
+                <Icon name="sliders" size={15} />
+                <span className="tf-toggle-text">{t('tf.title')}</span>
+                {picked > 0 && <span className="tf-badge">{picked}</span>}
+              </button>
+              <Sheet open={sheet} onClose={() => setSheet(false)} title={t('tf.title')} className="tf-sheet ts-sheet">
+                {tools}
+                {res.data.total > 0 && (
+                  <FilterBar bare data={res.data} busy={res.isPlaceholderData} filter={tf.filter} mode={tf.mode} onFilter={tf.setFilter} onMode={tf.setMode} />
+                )}
+                <ul className="ts-sources" aria-label={t('ts.sources')}>
+                  {res.data.sources
+                    .filter((s) => s.status !== 'skipped' && s.status !== 'off')
+                    .map((s) => (
+                      <li key={s.id} className={`ts-source is-${s.status}`} title={`${s.ms} ms`}>
+                        {sourceName(s.id)}
+                        <span>{s.status === 'ok' ? s.count : s.status === 'blocked' ? t('ts.blocked') : t('ts.failed')}</span>
+                      </li>
+                    ))}
+                </ul>
+                <div className="sheet-actions">
+                  <button
+                    type="button"
+                    className="btn btn-glass"
+                    disabled={picked === 0}
+                    onClick={() => (tf.setFilter(EMPTY_FILTER), setCat('all'), setSort('best'))}
+                  >
+                    {t('tf.reset')}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={() => setSheet(false)}>
+                    {t('tor.count', { n: shown.length })}
+                  </button>
+                </div>
+              </Sheet>
+            </div>
+          ) : (
+            <>
           <ul className="ts-sources" aria-label={t('ts.sources')}>
             {res.data.sources
               .filter((s) => s.status !== 'skipped' && s.status !== 'off')
@@ -652,6 +710,8 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
           </ul>
           {res.data.total > 0 && (
             <FilterBar data={res.data} busy={res.isPlaceholderData} filter={tf.filter} mode={tf.mode} onFilter={tf.setFilter} onMode={tf.setMode} />
+          )}
+            </>
           )}
           {start.error instanceof ApiError && start.error.code === 'needs_vpn' ? (
             <NeedsVpn />
@@ -670,7 +730,7 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
             )
           ) : (
             <>
-              <p className="ts-count">{t('tor.count', { n: shown.length })}</p>
+              {!phone && <p className="ts-count">{t('tor.count', { n: shown.length })}</p>}
               <ol className="ts-list">
                 {shown.map((r) => (
                   <TorrentRow

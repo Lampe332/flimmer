@@ -21,7 +21,7 @@ export function useTorrentFilter() {
   }
 }
 
-const activeCount = (f: TorrentFilter) =>
+export const activeCount = (f: TorrentFilter) =>
   FILTER_DIMS.reduce((n, d) => n + (f.values[d]?.length ?? 0), 0) + Number(f.minSeeders > 0) + Number(f.minSizeGb > 0 || f.maxSizeGb > 0) + Number(f.cam)
 
 /** Rows of the bar, in reading order; "Ton" holds both format and channels. */
@@ -103,14 +103,16 @@ type BarProps = {
   onMode: (next: TorrentMode) => void
   /** Player side panel: folded by default, one line until opened. */
   compact?: boolean
+  /** Phone torrent search: rows always open, no own toggle, count or sheet (the page's filter sheet holds it). */
+  bare?: boolean
 }
 
 /** Filter chips with live counts from the API, the order switch and "Zurücksetzen". */
-export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact }: BarProps) {
+export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact, bare }: BarProps) {
   const { t } = useI18n()
   // phones: the filters open as a bottom sheet, folded by default
   const phone = useIsPhone()
-  const [open, setOpen] = useState(!compact && !phone)
+  const [open, setOpen] = useState(bare || (!compact && !phone))
   const id = useId()
   const facets: Facets = data?.facets ?? {}
   const n = activeCount(filter)
@@ -134,6 +136,7 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
             </button>
           ))}
         </div>
+        {!bare && (<>
         <button
           type="button"
           className={`tf-toggle${n > 0 ? ' has-active' : ''}`}
@@ -157,10 +160,11 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
           <Icon name="refresh" size={14} />
           {t('tf.reset')}
         </button>
+        </>)}
       </div>
       <p className="field-hint tf-mode-hint">{t(mode === 'fast' ? 'tf.fastHintSources' : 'tf.qualityHint')}</p>
 
-      {phone ? (
+      {phone && !bare ? (
         <Sheet open={open} onClose={() => setOpen(false)} title={t('tf.title')} className="tf-sheet">
           {rows}
           <div className="sheet-actions">

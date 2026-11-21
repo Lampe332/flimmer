@@ -763,3 +763,133 @@
 .mpage-bar + .set-card > .set-title {
   display: none;
 }
+
+/* ---------------------------------------------------------------- phone player without app chrome
+   After Seanime Mobile: upright the video sits on the top edge, title, infos and episodes follow below; sideways it
+   fills the screen. Back is a 44 px button on the video's top left corner and fades out with the controls.
+   `.is-bare` is set by the Shell for the PHONE_PLAYER_MQ rule in lib/platform.ts. */
+.is-bare .main {
+  padding-top: 0;
+}
+.app.is-bare {
+  padding-bottom: 0;
+}
+.is-bare .player-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: env(safe-area-inset-top, 0px) var(--gutter) 32px;
+}
+.is-bare .player-layout,
+.is-bare .player-main {
+  display: contents;
+}
+.is-bare .stage {
+  order: -2;
+  margin-inline: calc(var(--gutter) * -1);
+  border-radius: 0;
+  box-shadow: none;
+}
+.is-bare .player-top {
+  order: -1;
+  margin: 0;
+}
+.is-bare .app-note,
+.is-bare .ep-nav,
+.is-bare .now-info,
+.is-bare .detail-section {
+  margin-block: 0;
+}
+.is-bare .back-link {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 8px;
+  z-index: 30;
+  width: 44px;
+  height: 44px;
+  background: rgb(0 0 0 / 0.5);
+  border-color: rgb(255 255 255 / 0.16);
+  color: #fff;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: opacity 0.24s ease;
+}
+/* while the video plays the button comes and goes with the controls; the controls' top row makes room for it */
+.is-bare .player-page:has(.vt:not(.is-shown)) .back-link {
+  opacity: 0;
+  pointer-events: none;
+}
+.is-bare .player-page:not(:has(:fullscreen)) .vt-top {
+  padding-left: 60px;
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .is-bare .stage.has-video {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    margin: 0;
+    aspect-ratio: auto;
+  }
+  .is-bare .back-link {
+    position: fixed;
+    left: max(8px, env(safe-area-inset-left));
+  }
+  html:has(.is-bare .stage.has-video) {
+    overflow: hidden;
+  }
+}
+
+/* ---------------------------------------------------------------- phone torrent search: hits first */
+.ts-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+.ts-bar .ts-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.ts-bar .tf-toggle {
+  min-height: 44px;
+}
+.ts-sheet .ts-tools {
+  margin-bottom: 14px;
+}
+.ts-sheet .ts-sources {
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  .ts-list .trow-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: 0.875rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .ts-list .fact-quality {
+    white-space: nowrap;
+  }
+  .ts-list .trow-sources,
+  .ts-list .trow-chips > :not(.is-lang) {
+    display: none;
+  }
+  .ts-list .trow-chips:not(:has(.is-lang)) {
+    display: none;
+  }
+  .ts-list .trow-play {
+    width: 44px;
+    height: 44px;
+    background: var(--lampe);
+    color: var(--lampe-tinte);
+  }
+  .ts-list .trow-dl {
+    width: 44px;
+    height: 44px;
+  }
+}

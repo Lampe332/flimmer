@@ -23,6 +23,12 @@ function useMedia(query: string): boolean {
 }
 
 export const useIsPhone = () => useMedia(PHONE_MQ)
+/**
+ * The player page without app chrome: phones upright (the phone layout) and phones turned sideways (wide but low).
+ * Same rule as the `.is-bare` player styles in mobile.css.
+ */
+export const PHONE_PLAYER_MQ = `${PHONE_MQ}, (orientation: landscape) and (max-height: 500px)`
+export const usePhonePlayer = () => useMedia(PHONE_PLAYER_MQ)
 export const useCoarse = () => useMedia(COARSE_MQ)
 export const isPhone = () => window.matchMedia(PHONE_MQ).matches
 

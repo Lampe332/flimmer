@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Route, Routes, useLocation, useNavigate, useNavigationType } from 'react-router'
 import ErrorBoundary from './components/ErrorBoundary'
 import Footer from './components/Footer'
+import { usePhonePlayer } from './lib/platform'
 import Header from './components/Header'
 import { PageLoader } from './components/States'
 import Toasts from './components/Toasts'
@@ -164,6 +165,8 @@ function Shell({ device }: { device: boolean }) {
   const { t } = useI18n()
   const gate = useSetupGate()
   const immersive = pathname.startsWith('/play/')
+  // Phone player: no header, footer or tab bar, the video owns the screen (like Seanime Mobile).
+  const bare = usePhonePlayer() && immersive
   usePrefetchPages()
   if (gate.setup.isPending) return <PageLoader />
   // The first-run setup needs the PC: token, VPN file and folders are set there.
@@ -175,12 +178,12 @@ function Shell({ device }: { device: boolean }) {
       </Suspense>
     )
   return (
-    <div className={`app${immersive ? ' is-immersive' : ''}${pathname === '/suche' ? ' is-search' : ''}`}>
+    <div className={`app${immersive ? ' is-immersive' : ''}${bare ? ' is-bare' : ''}${pathname === '/suche' ? ' is-search' : ''}`}>
       <a href="#main" className="skip-link">
         {t('app.skip')}
       </a>
       <ScrollManager />
-      <Header />
+      {!bare && <Header />}
       <main id="main" className="main">
         <ErrorBoundary key={pathname}>
           <Suspense fallback={<PageLoader />}>
@@ -204,7 +207,7 @@ function Shell({ device }: { device: boolean }) {
           </Suspense>
         </ErrorBoundary>
       </main>
-      <Footer />
+      {!bare && <Footer />}
       <Tour />
       <Toasts />
     </div>
