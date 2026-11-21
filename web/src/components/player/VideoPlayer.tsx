@@ -70,7 +70,7 @@ type TorrentSource = {
 type Option = { id: number; label: string; hint?: string }
 /** A playlist track; its label is built at render time so it follows the UI language. */
 type TrackRef = { id: number; lang: string | null; name: string | null }
-type MenuId = 'quality' | 'audio' | 'subs'
+type MenuId = 'quality' | 'audio' | 'subs' | 'settings'
 
 /** iOS Safari ignores video.volume (only muting works); everything Chromium-based honours it. */
 const CAN_SET_VOLUME = (() => {
@@ -930,7 +930,7 @@ export default function VideoPlayer({
       className={`vp${hidden ? ' is-idle' : ''}${fullscreen ? ' is-fullscreen' : ''}${coarse ? ' is-touch' : ''}`}
       data-audio-track={audio}
       data-subtitle-track={sub}
-      onPointerLeave={(e) => e.pointerType !== 'touch' && playing && !document.fullscreenElement && setIdle(true)}
+      onPointerLeave={(e) => e.pointerType !== 'touch' && !coarse && playing && !document.fullscreenElement && setIdle(true)}
     >
       <video
         ref={video}
@@ -1109,6 +1109,9 @@ export default function VideoPlayer({
           next={next}
           muted={vol.muted || vol.volume === 0}
           toggleMute={toggleMute}
+          volume={vol.muted ? 0 : vol.volume}
+          setVolume={(v) => setVol({ volume: v, muted: false })}
+          media={() => video.current}
           menu={menu}
           setMenu={setMenu}
           subs={{
@@ -1121,7 +1124,7 @@ export default function VideoPlayer({
           }}
           audio={audios.length > 1 ? { title: t('scan.audio'), icon: 'audio', value: audio, options: audioOptions, onPick: pickAudio } : null}
           quality={
-            levels.length > 0
+            levels.length > 1
               ? { title: t('vp.quality'), icon: 'layers', value: level, options: [{ id: -1, label: t('vp.auto'), hint: activeLabel }, ...levels], onPick: pickLevel }
               : null
           }

@@ -5,9 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.GeolocationPermissions
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
@@ -69,8 +72,36 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  /**
+   * The phone player's brightness swipe (left half): `window.FlimmerScreen` sets this window's brightness;
+   * a negative value gives it back to the system (the player does that when it closes).
+   */
+  private inner class ScreenBridge {
+    @JavascriptInterface
+    fun getBrightness(): Float {
+      val own = window.attributes.screenBrightness
+      if (own >= 0f) return own
+      return try {
+        Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+      } catch (e: Exception) {
+        0.5f
+      }
+    }
+
+    @JavascriptInterface
+    fun setBrightness(value: Float) {
+      runOnUiThread {
+        val attrs = window.attributes
+        attrs.screenBrightness =
+          if (value < 0f) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else value.coerceIn(0.01f, 1f)
+        window.attributes = attrs
+      }
+    }
+  }
+
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    webView.addJavascriptInterface(ScreenBridge(), "FlimmerScreen")
     clearCacheAfterUpdate(webView)
     // After the WebView has its own chrome client (file picker, dialogs): wrap it to add real fullscreen.
     webView.post {

@@ -1,76 +1,94 @@
 /* Phone parts: the touch player and the bottom sheet. Loaded after styles.css. */
 /* ---------------------------------------------------------------- touch player (phones, fingers)
-   Sizes after the phone player of Seanime Mobile: 44 px buttons, 64/76 px play, 52/60 px seek,
-   bars fade with opacity only. The picture is one big tap target under the chrome. */
+   Sizes and timing after the phone player of Seanime Mobile (components/player/phone/controls.ts sets the
+   --vt-* sizes by the player's width). The picture is one big gesture target under the chrome. */
 .vp.is-touch .vp-overlay,
 .vp.is-touch .vp-resume,
 .vp.is-touch .vp-upnext,
 .vp.is-touch .vp-help {
   z-index: 3;
 }
+/* the resume hint sits under the top row, so back and settings stay reachable */
+.vp.is-touch .vp-resume {
+  top: calc(env(safe-area-inset-top) + 60px);
+}
+.vp.is-touch.is-fullscreen .vp-resume {
+  top: 60px;
+}
 .vt {
-  --vt-btn: 44px;
-  --vt-play: 64px;
-  --vt-seek: 52px;
-  --vt-gap: 28px;
-  --vt-pad: 8px;
   position: absolute;
   inset: 0;
+  overflow: hidden;
   font-family: var(--body);
+  overscroll-behavior: contain;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.vt-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: #000;
+  pointer-events: none;
 }
 .vt-surface {
   position: absolute;
   inset: 0;
   z-index: 1;
   background: rgb(0 0 0 / 0);
-  transition: background-color 0.24s ease;
-  touch-action: manipulation;
+  transition: background-color 0.14s ease-in;
+  /* the finger belongs to the player: no page scroll or zoom while swiping */
+  touch-action: none;
 }
 .vt.is-shown .vt-surface {
-  background: rgb(0 0 0 / 0.38);
+  background: rgb(0 0 0 / 0.28);
+  transition: background-color 0.18s ease-out;
+}
+
+/* the chrome fades and grows in 180 ms, out in 140 ms */
+.vt-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 0.14s ease-in, transform 0.14s ease-in;
+}
+.vt.is-shown .vt-chrome {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+}
+.vt.is-shown .vt-top > button,
+.vt.is-shown .vt-mid-row > button,
+.vt.is-shown .vt-row > button,
+.vt.is-shown .vt-bar {
+  pointer-events: auto;
 }
 .vt-top,
-.vt-mid,
 .vt-bottom {
   position: absolute;
   left: 0;
   right: 0;
-  z-index: 2;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.24s ease;
-}
-.vt.is-shown .vt-top,
-.vt.is-shown .vt-mid,
-.vt.is-shown .vt-bottom {
-  opacity: 1;
-}
-.vt.is-shown .vt-top > *,
-.vt.is-shown .vt-mid > *,
-.vt.is-shown .vt-bottom > .vt-bar,
-.vt.is-shown .vt-row > * {
-  pointer-events: auto;
-}
-.vt.is-shown .vt-top > .vt-title,
-.vt.is-shown .vt-mid > .is-spacer,
-.vt.is-shown .vt-row > .vt-spacer {
-  pointer-events: none;
 }
 
 .vt-top {
   top: 0;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: max(var(--vt-pad), env(safe-area-inset-top)) max(var(--vt-pad), env(safe-area-inset-right)) 28px
-    max(var(--vt-pad), env(safe-area-inset-left));
-  background: linear-gradient(rgb(0 0 0 / 0.6), rgb(0 0 0 / 0));
+  padding: calc(var(--vt-pt) + env(safe-area-inset-top)) max(var(--vt-px), env(safe-area-inset-right)) 28px
+    max(var(--vt-px), env(safe-area-inset-left));
+  background: linear-gradient(rgb(0 0 0 / 0.62), rgb(0 0 0 / 0));
+}
+.vt.is-fullscreen .vt-top {
+  padding-top: var(--vt-pt);
 }
 .vt-title {
   flex: 1;
   min-width: 0;
-  padding: 0 6px;
+  padding: 0 8px;
 }
 .vt-title-main,
 .vt-title-sub {
@@ -79,12 +97,12 @@
   text-overflow: ellipsis;
 }
 .vt-title-main {
-  font: 700 0.95rem/1.25 var(--display);
+  font: 700 var(--vt-title) / 1.25 var(--display);
   font-stretch: 84%;
 }
 .vt-title-sub {
-  color: rgb(255 255 255 / 0.72);
-  font-size: 0.78rem;
+  color: rgb(255 255 255 / 0.7);
+  font-size: calc(var(--vt-title) - 2px);
 }
 .vt-btn {
   display: grid;
@@ -94,6 +112,7 @@
   height: var(--vt-btn);
   border-radius: 50%;
   color: #fff;
+  touch-action: manipulation;
   transition: background-color 0.16s ease, transform 0.16s var(--ease-out);
 }
 .vt-btn:active {
@@ -104,18 +123,22 @@
 .vt-seek:focus-visible,
 .vt-play:focus-visible,
 .vt-time:focus-visible,
+.vt-next:focus-visible,
 .vt-bar:focus-visible {
   outline: 2px solid var(--lampe);
   outline-offset: 2px;
 }
 
 .vt-mid {
-  top: 50%;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.vt-mid-row {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: var(--vt-gap);
-  transform: translateY(-50%);
 }
 .vt-seek {
   position: relative;
@@ -126,6 +149,7 @@
   border-radius: 50%;
   background: rgb(0 0 0 / 0.32);
   color: #fff;
+  touch-action: manipulation;
   transition: transform 0.16s var(--ease-out);
 }
 .vt-seek > span {
@@ -144,6 +168,7 @@
   background: var(--lampe);
   color: var(--lampe-tinte);
   box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+  touch-action: manipulation;
   transition: transform 0.16s var(--ease-out);
 }
 .vt-play.is-spacer {
@@ -154,25 +179,34 @@
 .vt-seek:active {
   transform: scale(0.92);
 }
+/* scrubbing: the target time takes the middle, large */
+.vt-scrub-time {
+  font: 700 clamp(2.4rem, 11vmin, 4rem) / 1 var(--display);
+  font-stretch: 84%;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 2px 18px rgb(0 0 0 / 0.55);
+}
 
 .vt-bottom {
   bottom: 0;
-  padding: 32px max(var(--vt-pad), env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom))
-    max(var(--vt-pad), env(safe-area-inset-left));
-  background: linear-gradient(rgb(0 0 0 / 0), rgb(0 0 0 / 0.65));
+  padding: 32px max(var(--vt-px), env(safe-area-inset-right)) calc(var(--vt-pb) + max(20px, env(safe-area-inset-bottom)))
+    max(var(--vt-px), env(safe-area-inset-left));
+  background: linear-gradient(rgb(0 0 0 / 0), rgb(0 0 0 / 0.66));
 }
 .vt-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 .vt-time {
   min-height: var(--vt-btn);
   padding: 0 8px;
   border-radius: var(--r-s);
   color: #fff;
-  font-size: 0.8rem;
+  font-size: var(--vt-time);
   font-variant-numeric: tabular-nums;
+  touch-action: manipulation;
 }
 .vt-time-total {
   color: rgb(255 255 255 / 0.6);
@@ -188,21 +222,39 @@
 .vt-spacer {
   flex: 1;
 }
-/* a 36 px touch strip around a thin track */
+.vt-next {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px 0 10px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.14);
+  color: #fff;
+  font: 600 var(--vt-time) var(--body);
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+.vt-next:active {
+  background: rgb(255 255 255 / 0.24);
+}
+/* a 32 px touch strip around a thin track */
 .vt-bar {
   position: relative;
-  height: 36px;
-  margin: -4px 14px 0;
+  height: 32px;
+  margin: 0 8px;
   touch-action: none;
 }
 .vt-track {
   position: absolute;
-  inset: 16px 0 auto;
-  height: 4px;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: var(--vt-track);
+  margin-top: calc(var(--vt-track) / -2);
   overflow: hidden;
-  border-radius: 2px;
+  border-radius: 999px;
   background: rgb(255 255 255 / 0.24);
-  transition: transform 0.16s var(--ease-out);
 }
 .vt-track > span {
   position: absolute;
@@ -224,33 +276,21 @@
 }
 .vt-thumb {
   position: absolute;
-  top: 18px;
-  width: 16px;
-  height: 16px;
-  margin: -8px 0 0 -8px;
+  top: 50%;
+  width: var(--vt-thumb);
+  height: var(--vt-thumb);
+  margin: calc(var(--vt-thumb) / -2) 0 0 calc(var(--vt-thumb) / -2);
   border-radius: 50%;
   background: var(--lampe);
   pointer-events: none;
   transition: transform 0.16s var(--ease-out);
 }
-.vt-bar.is-scrubbing .vt-track {
-  transform: scaleY(1.6);
-}
 .vt-bar.is-scrubbing .vt-thumb {
-  transform: scale(1.5);
+  transform: scale(1.35);
   box-shadow: 0 0 0 6px rgb(var(--lampe-rgb) / 0.25);
 }
-.vt-tip {
-  position: absolute;
-  bottom: 34px;
-  padding: 4px 10px;
-  border-radius: var(--r-s);
-  background: var(--rang);
-  color: var(--leinwand);
-  font: 600 0.9rem var(--body);
-  font-variant-numeric: tabular-nums;
-  transform: translateX(-50%);
-  pointer-events: none;
+.vt.is-scrubbing .vt-surface {
+  background: rgb(0 0 0 / 0.45);
 }
 
 /* double tap feedback: a soft half-moon on the tapped side */
@@ -266,7 +306,7 @@
   gap: 6px;
   width: 38%;
   color: #fff;
-  font: 600 0.9rem var(--body);
+  font: 700 1rem var(--body);
   font-variant-numeric: tabular-nums;
   background: rgb(255 255 255 / 0.1);
   pointer-events: none;
@@ -292,38 +332,56 @@
     opacity: 0;
   }
 }
-.vt-message {
+/* 2x, brightness and volume: a small card over the picture */
+.vt-hud {
   position: absolute;
-  top: 22%;
+  top: 18%;
   left: 50%;
-  z-index: 2;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: rgb(0 0 0 / 0.6);
-  font-size: 0.85rem;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 96px;
+  padding: 10px 16px 12px;
+  border-radius: var(--r-m, 14px);
+  background: rgb(9 12 23 / 0.78);
+  color: #fff;
   transform: translateX(-50%);
   pointer-events: none;
 }
-
-@media (min-width: 560px) {
-  .vt {
-    --vt-play: 76px;
-    --vt-seek: 60px;
-    --vt-gap: 44px;
-    --vt-pad: 14px;
-  }
+.vt-hud-label {
+  color: rgb(255 255 255 / 0.7);
+  font-size: 0.75rem;
 }
-/* landscape phone: little height, a smaller middle row */
-@media (max-height: 420px) {
-  .vt {
-    --vt-play: 56px;
-    --vt-seek: 46px;
-  }
-  .vt-top {
-    padding-bottom: 16px;
-  }
-  .vt-bottom {
-    padding-top: 18px;
+.vt-hud-text {
+  font: 700 1.35rem / 1 var(--display);
+  font-variant-numeric: tabular-nums;
+}
+.vt-hud-meter {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.2);
+}
+.vt-hud-meter > span {
+  position: absolute;
+  inset: 0;
+  background: var(--lampe);
+  transform-origin: left;
+}
+.vt-sheet-head {
+  padding: 14px 4px 6px;
+  color: rgb(255 255 255 / 0.6);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vt-chrome,
+  .vt.is-shown .vt-chrome {
+    transform: none;
   }
 }
 
@@ -819,13 +877,9 @@
   backdrop-filter: blur(10px);
   transition: opacity 0.24s ease;
 }
-/* while the video plays the button comes and goes with the controls; the controls' top row makes room for it */
-.is-bare .player-page:has(.vt:not(.is-shown)) .back-link {
-  opacity: 0;
-  pointer-events: none;
-}
-.is-bare .player-page:not(:has(:fullscreen)) .vt-top {
-  padding-left: 60px;
+/* with the touch player the back button is the first one of its top row */
+.is-bare .player-page:has(.vt) .back-link {
+  display: none;
 }
 @media (orientation: landscape) and (max-height: 500px) {
   .is-bare .stage.has-video {
