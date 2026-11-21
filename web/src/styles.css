@@ -4889,7 +4889,8 @@ html[data-motion='reduce'] .hero-img {
   grid-template-rows: auto 1fr;
   gap: clamp(20px, 4vh, 40px);
   padding: clamp(16px, 3vw, 32px) 16px 48px;
-  overflow: hidden;
+  /* clip, not hidden: the glow sticks out 10% and a hidden box can still be scrolled, so focusing the step title shifted the whole card left */
+  overflow: clip;
 }
 .ob-glow {
   position: absolute;
