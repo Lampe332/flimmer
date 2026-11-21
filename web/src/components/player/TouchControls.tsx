@@ -261,6 +261,8 @@ export default function TouchControls(p: Props) {
     }
     // a long press or a swipe is never the first half of a double tap
     if (g.mode !== 'pending' || g.moved || cancelled) lastTap.current = null
+    // the bars that are up stay up a full idle time after a gesture, so the next tap finds its button
+    if (p.shown) p.show()
     if (g.mode === 'long') {
       const el = p.media()
       if (el) el.playbackRate = g.rate
