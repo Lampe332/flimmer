@@ -13,6 +13,7 @@ import { pushBack } from '../../../lib/platform'
 import { SUB_BGS, SUB_SIZES, VIDEO_FITS, setPrefs, usePrefs, type SubBg, type SubSize, type VideoFit } from '../../../lib/prefs'
 import Icon from '../../Icon'
 import Sheet, { SheetOption } from '../../Sheet'
+import { useLetterbox } from './letterbox'
 
 export const SPEED_MIN = 0.25
 export const SPEED_MAX = 2
@@ -93,6 +94,9 @@ export default function SettingsMenu(p: Props) {
       delete el.dataset.subBg
     }
   }, [prefs.videoFit, prefs.subSize, prefs.subBg])
+
+  // black bars burned into the frame are cut off, so fit and zoom work on the picture itself
+  useLetterbox(() => live.current.media())
 
   // subtitle delay: every cue of the shown tracks moves by `delay` from its own time (new cues as they arrive)
   const origin = useRef(new WeakMap<TextTrackCue, [number, number]>())

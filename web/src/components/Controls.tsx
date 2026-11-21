@@ -78,7 +78,7 @@ export function Segmented<T extends string | number>(p: {
           key={String(o.id)}
           type="button"
           role="radio"
-          className="chip"
+          className="seg-item"
           aria-checked={o.id === p.value}
           tabIndex={o.id === p.value ? 0 : -1}
           onClick={() => p.onChange(o.id)}
