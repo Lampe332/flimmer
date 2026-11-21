@@ -5659,3 +5659,83 @@ html[data-motion='reduce'] .hero-img {
     width: 100%;
   }
 }
+
+/* ---------- Handy & Tablet im WLAN: pairing page and settings ---------- */
+.pair .ob-card {
+  width: min(560px, 100%);
+}
+.pair-lang {
+  margin-left: auto;
+}
+.pair-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.pair-form .field {
+  flex: 1 1 200px;
+}
+.pair-pin,
+.lan-pin {
+  font: 700 1.75rem / 1.2 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.22em;
+}
+.pair-pin {
+  text-align: center;
+}
+.pair-pin::placeholder {
+  color: var(--dunst);
+  opacity: 0.5;
+}
+.lan-url {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--rang);
+  font: 600 0.9375rem ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.lan-pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--rang);
+}
+.lan-qr {
+  flex: none;
+  width: 200px;
+  height: 200px;
+  border-radius: 10px;
+  background: #fff;
+}
+.lan-pairing-text {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 8px;
+  justify-items: start;
+}
+.lan-pin {
+  color: var(--lampe);
+}
+.lan-devices {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+.lan-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.lan-device-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}

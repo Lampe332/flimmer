@@ -259,6 +259,10 @@ async fn prefs_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
 }
 
 const EXPORT_KIND: &str = "flimmer-settings";
+/// The newest export format this build reads.
+const EXPORT_VERSION: u64 = 1;
+/// More titles than anyone keeps for later; a file with more is not an export.
+const IMPORT_WATCHLIST_MAX: usize = 5000;
 
 /// Everything "Exportieren" writes: preferences, source and torrent settings (folders, upload; not the VPN
 /// file) and the watchlist. Never the TMDB token or VPN keys.
@@ -268,7 +272,7 @@ fn export_value(st: &Arc<AppState>) -> ApiResult<Value> {
     let tor = torrent::load_settings(st)?;
     Ok(json!({
         "kind": EXPORT_KIND,
-        "version": 1,
+        "version": EXPORT_VERSION,
         "app_version": env!("CARGO_PKG_VERSION"),
         "prefs": prefs.unwrap_or_else(|| json!({})),
         "sources": scan,
@@ -308,6 +312,22 @@ async fn import(State(st): St, body: Bytes) -> ApiResult<Json<Value>> {
     if v.get("kind").and_then(Value::as_str) != Some(EXPORT_KIND) {
         return Err(ApiError::bad_request("this is not a Flimmer export"));
     }
+    if !v.get("version").and_then(Value::as_u64).is_some_and(|n| (1..=EXPORT_VERSION).contains(&n)) {
+        return Err(ApiError::bad_request("this export comes from a newer Flimmer"));
+    }
+    // Check the whole file before anything is applied: a damaged file changes nothing.
+    let shape_ok = ["prefs", "sources", "torrents"].iter().all(|k| v.get(k).is_none_or(Value::is_object))
+        && v.get("watchlist").is_none_or(|w| w.as_array().is_some_and(|a| a.len() <= IMPORT_WATCHLIST_MAX));
+    if !shape_ok {
+        return Err(ApiError::bad_request("this export file is damaged"));
+    }
+    let mut watchlist = Vec::new();
+    for item in v.get("watchlist").and_then(Value::as_array).into_iter().flatten() {
+        let mut item: crate::model::Item =
+            serde_json::from_value(item.clone()).map_err(|_| ApiError::bad_request("the watchlist in this file is damaged"))?;
+        item.clean();
+        watchlist.push(item);
+    }
     if let Some(prefs) = v.get("prefs").filter(|p| p.is_object()) {
         prefs_put(State(st.clone()), Bytes::from(prefs.to_string())).await?;
     }
@@ -323,14 +343,10 @@ async fn import(State(st): St, body: Bytes) -> ApiResult<Json<Value>> {
         let body = serde_json::to_vec(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
         torrent::settings_put(State(st.clone()), Bytes::from(body)).await?;
     }
-    let mut added = 0;
-    for item in v.get("watchlist").and_then(Value::as_array).into_iter().flatten() {
-        let item: crate::model::Item =
-            serde_json::from_value(item.clone()).map_err(|_| ApiError::bad_request("the watchlist in this file is damaged"))?;
-        st.db.put(&item)?;
-        added += 1;
+    for item in &watchlist {
+        st.db.put(item)?;
     }
-    Ok(Json(json!({ "watchlist": added })))
+    Ok(Json(json!({ "watchlist": watchlist.len() })))
 }
 
 fn scan_profile() -> std::path::PathBuf {
@@ -387,6 +403,8 @@ async fn reset(State(st): St, Json(body): Json<ResetBody>) -> ApiResult<StatusCo
     let _ = std::fs::remove_file(paths::vpn_file());
     st.torrents.vpn.down();
     st.tmdb.set_token(String::new());
+    // The phone mode and its paired devices were in the settings table too.
+    st.guard.forget_all();
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -40,6 +40,41 @@ pub struct Item {
     pub overview: String,
 }
 
+/// Cuts a text to `max` characters.
+fn clip(text: &mut String, max: usize) {
+    if let Some((at, _)) = text.char_indices().nth(max) {
+        text.truncate(at);
+    }
+}
+
+/// Stored pictures are TMDB pictures. Anything else (an import file, a foreign request) is dropped, so the UI
+/// never loads an image from an address someone slipped in.
+fn tmdb_image(url: Option<String>) -> Option<String> {
+    url.filter(|u| u.starts_with("https://image.tmdb.org/t/p/") && u.len() <= 300 && !u.contains(['"', '<', '>', ' ', '\\']))
+}
+
+impl Item {
+    /// Brings a card that came from outside (request body, import file) into the shape Flimmer stores.
+    pub fn clean(&mut self) {
+        clip(&mut self.title, 300);
+        clip(&mut self.overview, 4000);
+        self.poster = tmdb_image(self.poster.take());
+        self.backdrop = tmdb_image(self.backdrop.take());
+        self.year = self.year.filter(|y| (1870..=2200).contains(y));
+        self.rating = self.rating.filter(|r| r.is_finite() && (0.0..=10.0).contains(r));
+    }
+}
+
+impl WatchMeta {
+    pub fn clean(&mut self) {
+        self.item.clean();
+        if let Some(name) = self.episode_name.as_mut() {
+            clip(name, 300);
+        }
+        self.still = tmdb_image(self.still.take());
+    }
+}
+
 /// What the UI hands over with a progress save, kept so lists render without TMDB calls.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchMeta {

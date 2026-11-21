@@ -167,6 +167,7 @@ Flimmer is already running. Look for its window in the taskbar.")
                 home: home.clone(),
                 port,
                 sniffer: Some(Arc::new(sniffer)),
+                dev: false,
             };
             let server = match tauri::async_runtime::block_on(flimmer::bind(opts)) {
                 Ok(s) => s,
@@ -175,8 +176,10 @@ Flimmer is already running. Look for its window in the taskbar.")
                     fail(&format!("Flimmer kann nicht starten:\n{e}\n\nLäuft Flimmer schon?"))
                 }
             };
-            let url = server.url.clone();
-            log.line(format_args!("server at {url}"));
+            // The window starts on a one-time link that hands it the session cookie; without that cookie the API
+            // answers nobody on this PC (other pages in a browser, other programs). The link is not logged.
+            let url = server.entry_url(Duration::from_secs(120));
+            log.line(format_args!("server at {}", server.url));
             let serve_log = log.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = server.serve(std::future::pending()).await {

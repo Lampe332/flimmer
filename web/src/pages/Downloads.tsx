@@ -27,6 +27,7 @@ import {
   type TorrentSettings,
   type Vpn,
 } from '../lib/torrents'
+import { useRole } from '../lib/session'
 import { useTitle } from '../lib/title'
 
 type Tab = 'downloads' | 'suche' | 'automatisch' | 'einstellungen'
@@ -41,7 +42,11 @@ export default function Downloads() {
   const { t } = useI18n()
   const [params, setParams] = useSearchParams()
   const raw = params.get('tab')
-  const tab: Tab = raw === 'suche' || raw === 'einstellungen' || raw === 'automatisch' ? raw : 'downloads'
+  // Folders, VPN and auto-download rules belong to the PC: a paired phone gets the list and the search.
+  const device = useRole() === 'device'
+  const tabs = device ? TABS.filter((x) => x.id === 'downloads' || x.id === 'suche') : TABS
+  const wanted: Tab = raw === 'suche' || raw === 'einstellungen' || raw === 'automatisch' ? raw : 'downloads'
+  const tab: Tab = tabs.some((x) => x.id === wanted) ? wanted : 'downloads'
   useTitle(t(TABS.find((x) => x.id === tab)?.label ?? 'dl.tabList'))
   const list = useTorrents()
   const torrents = list.data?.torrents ?? []
@@ -61,7 +66,7 @@ export default function Downloads() {
       </div>
 
       <div className="tabs dl-tabs" role="tablist" aria-label={t('nav.downloads')}>
-        {TABS.map((x) => (
+        {tabs.map((x) => (
           <button
             key={x.id}
             type="button"
@@ -238,6 +243,7 @@ type QueueCtl = { pos: number; first: boolean; last: boolean; busy: boolean; up:
 
 function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: () => void; onPick: () => void; queue?: QueueCtl }) {
   const { t } = useI18n()
+  const device = useRole() === 'device'
   const qc = useQueryClient()
   const act = useMutation({
     mutationFn: (what: 'pause' | 'resume' | 'open') => (what === 'pause' ? torrentApi.pause(x.id) : what === 'resume' ? torrentApi.resume(x.id) : torrentApi.open(x.id)),
@@ -338,7 +344,7 @@ function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: ()
             <Icon name="layers" size={16} />
           </button>
         )}
-        {x.folder && x.downloaded > 0 && (
+        {x.folder && x.downloaded > 0 && !device && (
           <button type="button" className="icon-btn" onClick={() => act.mutate('open')} aria-label={t('dl.openFolder')} title={t('dl.openFolder')}>
             <Icon name="folder" size={16} />
           </button>
@@ -376,6 +382,8 @@ function Modal({ labelledBy, onClose, children, wide }: { labelledBy: string; on
 
 function RemoveDialog({ x, onClose }: { x: Torrent; onClose: () => void }) {
   const { t } = useI18n()
+  // Deleting files from the PC's drive is done at the PC.
+  const device = useRole() === 'device'
   const qc = useQueryClient()
   const remove = useMutation({
     mutationFn: (withFiles: boolean) => torrentApi.remove(x.id, withFiles),
@@ -401,10 +409,12 @@ function RemoveDialog({ x, onClose }: { x: Torrent; onClose: () => void }) {
           <button type="button" className="btn btn-glass" onClick={() => remove.mutate(false)} disabled={remove.isPending}>
             {t('dl.removeKeep')}
           </button>
-          <button type="button" className="btn btn-danger" onClick={() => remove.mutate(true)} disabled={remove.isPending}>
-            <Icon name="trash" size={17} />
-            {t('dl.removeFiles')}
-          </button>
+          {!device && (
+            <button type="button" className="btn btn-danger" onClick={() => remove.mutate(true)} disabled={remove.isPending}>
+              <Icon name="trash" size={17} />
+              {t('dl.removeFiles')}
+            </button>
+          )}
         </div>
       </div>
     </Modal>

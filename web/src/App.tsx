@@ -9,8 +9,10 @@ import Toasts from './components/Toasts'
 import Tour, { startTour } from './components/Tour'
 import { useI18n } from './i18n'
 import { START_PAGES, getPrefs, loadPrefs } from './lib/prefs'
+import { registerShellWorker, useSession } from './lib/session'
 import { useSetup } from './lib/setup'
 import Home from './pages/Home'
+import Pair, { SetupOnPc } from './pages/Pair'
 
 const Browse = lazy(() => import('./pages/Browse'))
 const Search = lazy(() => import('./pages/Search'))
@@ -100,13 +102,39 @@ function useSetupGate() {
   return { setup, show: needed || pathname === '/einrichtung', finish }
 }
 
+/**
+ * In front of everything: who is this page to the server? The desktop window has its session, a paired phone
+ * its device token; anybody else gets the pairing page and nothing of the app.
+ */
 export default function App() {
-  const { pathname } = useLocation()
   // Subscribing here re-renders the whole tree on a language switch.
+  useI18n()
+  const session = useSession()
+  const qc = useQueryClient()
+  const role = session.data?.role
+  useEffect(() => {
+    const onUnpaired = () => void qc.invalidateQueries({ queryKey: ['session'] })
+    window.addEventListener('flimmer:unpaired', onUnpaired)
+    return () => window.removeEventListener('flimmer:unpaired', onUnpaired)
+  }, [qc])
+  useEffect(() => {
+    if (role === 'device') registerShellWorker()
+  }, [role])
+  if (session.isPending) return <PageLoader />
+  // No answer at all (server gone): the app's own error pages say so.
+  if (!session.data) return <Shell device={false} />
+  if (session.data.role === 'none') return <Pair session={session.data} />
+  return <Shell device={session.data.role === 'device'} />
+}
+
+function Shell({ device }: { device: boolean }) {
+  const { pathname } = useLocation()
   const { t } = useI18n()
   const gate = useSetupGate()
   const immersive = pathname.startsWith('/play/')
   if (gate.setup.isPending) return <PageLoader />
+  // The first-run setup needs the PC: token, VPN file and folders are set there.
+  if (gate.show && gate.setup.data && device) return <SetupOnPc />
   if (gate.show && gate.setup.data)
     return (
       <Suspense fallback={<PageLoader />}>

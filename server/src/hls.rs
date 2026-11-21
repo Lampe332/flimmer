@@ -214,7 +214,8 @@ pub fn parse_media(body: &str) -> Vec<Segment> {
 pub fn wrap(id: &str, base: &Url, target: &str) -> String {
     let abs = base.join(target).map(String::from).unwrap_or_else(|_| target.to_string());
     let enc: String = url::form_urlencoded::byte_serialize(abs.as_bytes()).collect();
-    format!("/api/stream/{id}/r?u={enc}")
+    // The signature is what `/r` accepts: it only fetches addresses that came out of this function.
+    format!("/api/stream/{id}/r?u={enc}&s={}", crate::guard::sign_stream(id, &abs))
 }
 
 /// Rewrites every URI of a master or media playlist (variant / segment lines and all
@@ -308,15 +309,25 @@ mod tests {
     #[test]
     fn rewrite_all_uris() {
         let base = Url::parse("https://cdn.example/x/y/master.m3u8?tok=1").unwrap();
+        // Every rewritten address carries the signature of (stream, target).
+        let local = |target: &str| {
+            let enc: String = url::form_urlencoded::byte_serialize(target.as_bytes()).collect();
+            format!("/api/stream/ab12/r?u={enc}&s={}", crate::guard::sign_stream("ab12", target))
+        };
         let out = rewrite("ab12", &base, MASTER);
-        assert!(out.contains("URI=\"/api/stream/ab12/r?u=https%3A%2F%2Fcdn.example%2Fx%2Fy%2Fa%2Fen.m3u8\""));
-        assert!(out.contains("\n/api/stream/ab12/r?u=https%3A%2F%2Fcdn.example%2Fhd%2F1080.m3u8%3Ft%3D1%26x%3D2\n"));
+        assert!(out.contains(&format!("URI=\"{}\"", local("https://cdn.example/x/y/a/en.m3u8"))));
+        assert!(out.contains("r?u=https%3A%2F%2Fcdn.example%2Fx%2Fy%2Fa%2Fen.m3u8&s="));
+        assert!(out.contains(&format!("
+{}
+", local("https://cdn.example/hd/1080.m3u8?t=1&x=2"))));
         assert!(out.contains("NAME=\"English, 5.1\",LANGUAGE=\"eng\""));
-        let key = rewrite("ab12", &base, "#EXT-X-KEY:METHOD=AES-128,URI=\"https://k.example/k\",IV=0x1\nseg.ts");
+        let key = rewrite("ab12", &base, "#EXT-X-KEY:METHOD=AES-128,URI=\"https://k.example/k\",IV=0x1
+seg.ts");
         assert_eq!(
             key,
-            "#EXT-X-KEY:METHOD=AES-128,URI=\"/api/stream/ab12/r?u=https%3A%2F%2Fk.example%2Fk\",IV=0x1\n\
-             /api/stream/ab12/r?u=https%3A%2F%2Fcdn.example%2Fx%2Fy%2Fseg.ts\n"
+            format!("#EXT-X-KEY:METHOD=AES-128,URI=\"{}\",IV=0x1
+{}
+", local("https://k.example/k"), local("https://cdn.example/x/y/seg.ts"))
         );
     }
 }

@@ -229,6 +229,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
       /* body was not JSON, keep status message */
     }
     if (code === 'needs_setup') window.dispatchEvent(new Event('flimmer:needs-setup'))
+    // The device was removed on the PC (or Flimmer restarted): back to the pairing page.
+    if (res.status === 401 && code === 'pairing_required') window.dispatchEvent(new Event('flimmer:unpaired'))
+    if (code === 'pc_only') message = t('lan.pcOnly')
     throw new ApiError(res.status, message, code)
   }
   if (res.status === 204) return undefined as T

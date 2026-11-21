@@ -101,7 +101,7 @@ interface BufferState { variant: number; from_seconds: number; ahead_seconds: nu
 | POST | `/api/scan/:type/:id?s=&e=` | `202` starts a scan of all providers (reuses results younger than 6 h unless `&force=1`; `&force=1&provider=<provider_id>` re-scans only that provider and keeps the rest); `Scan` body. Without sniffer: `200` with state `"unavailable"` |
 | GET | `/api/scan/:type/:id?s=&e=` | `Scan` (UI polls ~1 s while `running`; results fill in as providers finish) |
 | GET | `/api/stream/:stream_id/master.m3u8` | proxied master playlist, all URIs rewritten to go through the server (correct Referer/Origin/UA added server-side). For `kind: "mp4"` streams: `307` to the proxied file |
-| GET | `/api/stream/:stream_id/r?u=<encoded>` | proxied sub-playlist / segment / key / subtitle (served from prefetch cache when present; response header `x-flimmer-cache: hit` \| `miss`) |
+| GET | `/api/stream/:stream_id/r?u=<encoded>&s=<signature>` | proxied sub-playlist / segment / key / subtitle (served from prefetch cache when present; response header `x-flimmer-cache: hit` \| `miss`) |
 | POST | `/api/stream/:stream_id/prefetch?variant=<i>&from=<seconds>` | `204`; downloads segments of that variant from `from` up to `from + prefetch_minutes` to `data/cache/<stream_id>/`, cancels the previous prefetch of that stream. `variant` = index into `ScanResult.variants`. `400` for mp4 streams or a bad index, `410` when expired |
 | GET | `/api/stream/:stream_id/buffer` | `BufferState` |
 | DELETE | `/api/stream/:stream_id` | `204`; stops prefetch, deletes its cache |
@@ -415,9 +415,57 @@ into the database once and that install counts as set up (no onboarding, no tour
 
 `Settings` (`/api/settings`) has `parallel` (4..=12, default 10): provider pages loading at the same time in a scan.
 
-All POST/PUT bodies above must be `application/json`, so another web page cannot send them (CORS preflight).
+All POST/PUT bodies above must be `application/json`. What keeps another web page out is the guard described under "Access, sessions and the phone mode".
 
 **Folders.** Development (`--root`): data in `<root>/data` as before. Installed: resources next to `Flimmer.exe`,
 data in `%LOCALAPPDATA%\local.flimmer.desktop\data` (the folder the uninstaller offers to delete). `--data <dir>`
 overrides it. The desktop app uses the port of its last start, else 43300, else the next free one up to 43399
 (`--port` pins one), and refuses a second start on the same data folder.
+
+## Access, sessions and the phone mode ("Handy & Tablet im WLAN")
+
+Threats, fixes and what stays open: [security.md](security.md). Every request passes one guard:
+
+- `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (LAN listener: `<lan address>:<port>`), else `403 { code: "forbidden_host" }`.
+- `/api`: `Sec-Fetch-Site` (when sent) must be `same-origin` or `none`, `Origin` (when sent) must be the server's own address, else `403` (`cross_site` / `cross_origin`). The server sends no CORS headers.
+- `/api` needs a session: the desktop window's cookie (role `pc`) or a paired device's cookie (role `device`). Without one: `401 { code: "pairing_required" }`. Open to everybody: `GET /api/session`, `POST /api/pair`, `GET /api/auth/enter`, and everything outside `/api` (the app shell).
+- A device that calls something only the PC may do gets `403 { code: "pc_only" }` (list in security.md).
+- Expensive endpoints have a budget per caller: `429 { code: "rate_limited" }` with `Retry-After`.
+- Paths with `..`, `\`, NUL or double encoding: `400 { code: "bad_path" }`.
+
+```ts
+interface Session { role: "pc" | "device" | "none"; via: "local" | "lan"; device: string | null }   // device = its name in the PC's list
+interface LanState {
+  enabled: boolean;
+  ip: string | null;                 // address picked by hand, null = automatic (the PC's main private address)
+  active_ip: string | null;          // what the server listens on right now
+  url: string | null;                // http://<active_ip>:<port>
+  port: number;
+  candidates: { ip: string; name: string }[];   // this PC's private IPv4 addresses
+  error: string | null;              // why the address could not be opened
+  pairing: { pin: string; link: string | null; qr: string | null; expires_in: number } | null;   // qr = SVG markup, link = <url>/pair#t=<one-time token>
+  devices: { id: string; name: string; created_at: string; last_seen: string; last_ip: string }[];
+}
+```
+
+| Method | Path | Answer |
+|---|---|---|
+| GET | `/api/auth/enter?t=<ticket>` | loopback only. A ticket from `Server::entry_url` works once: sets the session cookie (`HttpOnly; SameSite=Strict`) and redirects to `/`. Else `403`. The desktop window starts on this address; `flimmer-server` prints such a link (or opens it with `--open`). |
+| GET | `/api/session` | `Session` |
+| POST | `/api/pair` | JSON `{ pin }` or `{ token }` → `200 { ok: true }` and the device cookie (`HttpOnly; SameSite=Strict`, one year). Errors: `403 wrong_pin`, `409 closed` (no pairing open on the PC), `409 full` (20 devices), `429 locked` with `retry_after` seconds (5 wrong tries from one address; 15 wrong tries in total close the pairing) |
+| POST | `/api/pair/logout` | `204`; the calling device removes itself |
+| GET | `/api/lan` | PC only. `LanState` |
+| PUT | `/api/lan` | PC only. JSON `{ enabled, ip? }` → `204`. `ip` must be one of `candidates`. The listener opens or closes within a moment; it never binds `0.0.0.0`, and it follows an address change within 15 s |
+| POST | `/api/lan/pairing` | PC only. Opens a pairing for 10 minutes (new PIN and QR token, each good for one device) → `LanState`. `400` while the phone mode is off |
+| DELETE | `/api/lan/pairing` | PC only. `204`; PIN and token stop working |
+| DELETE | `/api/lan/devices/:id` | PC only. `204`; that device's token stops working at once |
+
+**Stream proxy.** `/api/stream/:id/r` needs `&s=<signature>` next to `u`: the server signs every address it writes into a playlist (and the redirect of an mp4 stream) with stream id and address, so `r` only fetches what belongs to that stream (`403` otherwise). Addresses are never built by the UI. Outgoing requests go to public addresses only; a blocked one answers `403`.
+
+**Folders.** `movies_dir`, `series_dir` and `vpn_config` must be paths on a local drive (`400` for `\server\share`, device paths, relative paths). `POST /api/torrents/:id/open` and `DELETE /api/torrents/:id?files=1` only act inside the download folders (`403` / files are kept).
+
+**Import.** `version` must be known (`400`), the body is at most 1 MB (`413`), the watchlist at most 5000 titles; image addresses that are not TMDB's are dropped.
+
+**PWA.** `/manifest.webmanifest` and `/sw.js` come with the web UI. The service worker keeps the app shell only and never answers `/api`. It is registered for paired devices where the browser allows one (https or localhost).
+
+**Development.** `flimmer-server --dev` also accepts the Vite dev server (`localhost:5173`, which proxies `/api`) as host and origin; open the printed start link through it (`http://localhost:5173/api/auth/enter?t=…`).

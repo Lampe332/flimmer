@@ -42,6 +42,7 @@ pub struct AppState {
     pub streams: Streams,
     pub torrents: Arc<crate::torrent::Torrents>,
     pub autodl: autodl::JobState,
+    pub guard: crate::guard::Guard,
 }
 
 pub(crate) type St = State<Arc<AppState>>;
@@ -367,6 +368,7 @@ async fn watchlist_put(State(st): St, Path((ty, id)): Path<(String, String)>, bo
     // The path is authoritative for the key.
     item.kind = kind;
     item.id = id;
+    item.clean();
     st.db.put(&item)?;
     Ok(StatusCode::NO_CONTENT)
 }

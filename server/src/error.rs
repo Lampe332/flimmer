@@ -19,6 +19,15 @@ impl ApiError {
         Self { status, message: message.into(), code: None }
     }
 
+    /// An error with a reason the UI acts on (`pc_only`, `pairing_required` …).
+    pub fn coded(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+        Self { code: Some(code), ..Self::new(status, message) }
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::FORBIDDEN, message)
+    }
+
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)
     }

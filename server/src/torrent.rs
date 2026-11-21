@@ -262,6 +262,70 @@ pub fn folder_for(settings: &TorrentSettings, media: Option<&Media>, torrent_nam
     }
 }
 
+/// A folder or file on a local drive (`D:\…`). Network paths (`\\server\share`) and device paths are refused:
+/// Windows would log in to a foreign file server with the user's account just by looking at such a path.
+pub fn local_path(path: &str) -> bool {
+    let p = FsPath::new(path);
+    #[cfg(windows)]
+    let local = matches!(p.components().next(), Some(Component::Prefix(pre)) if matches!(pre.kind(), std::path::Prefix::Disk(_)));
+    #[cfg(not(windows))]
+    let local = true;
+    local && p.is_absolute() && !p.components().any(|c| matches!(c, Component::ParentDir))
+}
+
+const ROOTS_KEY: &str = "download_roots";
+
+/// The parent folder a torrent's folder was made in (`folder_for` backwards).
+fn root_of(m: &Meta) -> Option<PathBuf> {
+    let folder = FsPath::new(&m.folder);
+    let up = match &m.media {
+        Some(media) if media.kind == "tv" && media.season.is_some() => folder.parent()?.parent()?,
+        _ => folder.parent()?,
+    };
+    Some(up.to_path_buf())
+}
+
+fn stored_roots(st: &AppState) -> Option<Vec<String>> {
+    st.db.blob_get(Table::Settings, ROOTS_KEY).ok().flatten().and_then(|d| serde_json::from_str(&d).ok())
+}
+
+/// Every folder Flimmer downloads into or ever did: the two in the settings plus earlier ones. Before the
+/// list existed, the earlier ones are taken from the known torrents once.
+fn download_roots(st: &AppState) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = match stored_roots(st) {
+        Some(list) => list.into_iter().map(PathBuf::from).collect(),
+        None => {
+            let found: Vec<PathBuf> = st.torrents.entries.lock().unwrap().values().filter_map(|e| root_of(&e.meta())).collect();
+            remember_roots(st, found.iter().map(|p| p.to_string_lossy().into_owned()));
+            found
+        }
+    };
+    if let Ok(s) = load_settings(st) {
+        roots.extend([PathBuf::from(s.movies_dir), PathBuf::from(s.series_dir)]);
+    }
+    roots
+}
+
+fn remember_roots(st: &AppState, more: impl Iterator<Item = String>) {
+    let mut list = stored_roots(st).unwrap_or_default();
+    for dir in more {
+        if local_path(&dir) && !list.iter().any(|d| d.eq_ignore_ascii_case(&dir)) {
+            list.push(dir);
+        }
+    }
+    let keep = list.len().saturating_sub(50);
+    if let Ok(data) = serde_json::to_string(&list[keep..]) {
+        let _ = st.db.blob_put(Table::Settings, ROOTS_KEY, &data);
+    }
+}
+
+/// Whether `folder` really lies inside a download folder (links and `..` resolved). Opening a folder in
+/// Explorer and deleting files only ever happen there.
+fn inside_downloads(st: &AppState, folder: &FsPath) -> bool {
+    let Ok(real) = folder.canonicalize() else { return false };
+    download_roots(st).iter().filter_map(|r| r.canonicalize().ok()).any(|root| real != root && real.starts_with(&root))
+}
+
 pub fn is_video(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     let name = lower.rsplit(['/', '\\']).next().unwrap_or_default();
@@ -1119,7 +1183,7 @@ pub async fn delete(State(st): St, Path(id): Path<String>, Query(q): Params) -> 
     tor.probes.lock().unwrap().retain(|(pid, _), _| *pid != id);
     tor.playing.lock().unwrap().retain(|(pid, _), _| *pid != id);
     let m = e.meta();
-    if q.get("files").is_some_and(|v| v == "1") && !m.folder.is_empty() {
+    if q.get("files").is_some_and(|v| v == "1") && !m.folder.is_empty() && inside_downloads(&st, FsPath::new(&m.folder)) {
         let folder = PathBuf::from(&m.folder);
         for f in &m.files {
             let rel = FsPath::new(&f.path);
@@ -1143,6 +1207,9 @@ pub async fn open_folder(State(st): St, Path(id): Path<String>) -> ApiResult<Sta
     let folder = PathBuf::from(&m.folder);
     if m.folder.is_empty() || !folder.is_dir() {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "the folder does not exist yet"));
+    }
+    if !inside_downloads(&st, &folder) {
+        return Err(ApiError::forbidden("the folder is not inside Flimmer's download folders"));
     }
     let video = m
         .files
@@ -1184,12 +1251,18 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
         return Err(ApiError::bad_request("upload_kbps must be between 1 and 1000"));
     }
     for (name, dir) in [("movies_dir", &s.movies_dir), ("series_dir", &s.series_dir)] {
-        if !FsPath::new(dir).is_absolute() {
-            return Err(ApiError::bad_request(format!("{name} must be an absolute path")));
+        if !local_path(dir) || dir.len() > 400 {
+            return Err(ApiError::bad_request(format!("{name} must be a folder on a local drive, like D:\\Filme")));
         }
     }
     if s.vpn_config.trim().is_empty() {
         return Err(ApiError::bad_request("vpn_config is required"));
+    }
+    if !local_path(&s.vpn_config) || s.vpn_config.len() > 400 {
+        return Err(ApiError::bad_request("vpn_config must be a file on a local drive"));
+    }
+    if s.min_free_gb > 10_000 {
+        return Err(ApiError::bad_request("min_free_gb is too large"));
     }
     if !(1..=10).contains(&s.max_active) {
         return Err(ApiError::bad_request("max_active must be between 1 and 10"));
@@ -1203,6 +1276,9 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
     let data = serde_json::to_string(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
     // Another set of sources: cached searches would show the old one.
     st.torrents.searcher.clear_cache();
+    // Folders used so far stay known, so their torrents can still be opened and removed.
+    let before = load_settings(&st)?;
+    remember_roots(&st, [before.movies_dir, before.series_dir, s.movies_dir.clone(), s.series_dir.clone()].into_iter());
     st.db.blob_put(Table::Settings, SETTINGS_KEY, &data)?;
     st.torrents.vpn.set_conf(PathBuf::from(&s.vpn_config));
     st.torrents.vpn.set_direct(s.allow_direct, s.direct);
@@ -1434,6 +1510,18 @@ mod tests {
         assert_eq!(sanitize("CON"), "_CON");
         assert_eq!(sanitize("com1.txt"), "_com1.txt");
         assert_eq!(sanitize("???"), "Unbenannt");
+        // Whatever a title or torrent name says, it stays one folder name.
+        assert_eq!(sanitize(r"..\..\Windows\System32"), "Windows System32");
+        assert_eq!(sanitize("../../etc"), "etc");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn only_local_drive_paths_are_download_folders() {
+        assert!(local_path(r"D:\Flimmer Downloads\Filme") && local_path("C:/Users/x/Videos"));
+        for bad in [r"\\evil.example\share", r"\\?\C:\x", r"\\.\pipe\x", "Filme", r"\Filme", r"D:Filme", r"D:\a\..\..\Windows", "//evil/share", ""] {
+            assert!(!local_path(bad), "{bad}");
+        }
     }
 
     fn files(list: &[(&str, u64)]) -> Vec<FileMeta> {

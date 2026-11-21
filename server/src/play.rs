@@ -123,7 +123,8 @@ fn extension(path: &str) -> String {
 
 /// The file as ffmpeg/ffprobe read it: Flimmer's own range endpoint.
 fn file_url(st: &AppState, id: &str, index: usize) -> String {
-    format!("http://127.0.0.1:{}/api/torrents/{id}/file/{index}", st.torrents.port)
+    // `ik` is the internal key: ffmpeg has no session cookie.
+    format!("http://127.0.0.1:{}/api/torrents/{id}/file/{index}?ik={}", st.torrents.port, st.guard.internal_key())
 }
 
 pub fn probe_from(json: &Value, ext: &str) -> Probe {

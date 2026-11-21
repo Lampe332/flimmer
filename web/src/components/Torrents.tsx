@@ -1,3 +1,4 @@
+import { useRole } from '../lib/session'
 import { useId, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
@@ -281,6 +282,7 @@ export function VpnNotice({ vpn, compact, noLink }: { vpn: Vpn | undefined; comp
   const { t } = useI18n()
   const qc = useQueryClient()
   const release = useMutation({ mutationFn: torrentApi.vpnRelease, onSuccess: () => refreshTorrents(qc) })
+  const device = useRole() === 'device'
   const problem = vpnProblem(vpn)
   if (!problem) return null
   return (
@@ -290,7 +292,7 @@ export function VpnNotice({ vpn, compact, noLink }: { vpn: Vpn | undefined; comp
         <p className="vpn-notice-title">{t(problem.title)}</p>
         <p>{t(problem.text)}</p>
         {vpn?.state === 'blocked' ? (
-          <button type="button" className="btn btn-glass vpn-notice-btn" onClick={() => release.mutate()} disabled={release.isPending}>
+          <button type="button" className="btn btn-glass vpn-notice-btn" onClick={() => release.mutate()} disabled={release.isPending || device}>
             {t('vpn.release')}
           </button>
         ) : (
