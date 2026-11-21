@@ -34,7 +34,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     api::{AppState, Params, St},
     db::{Table, now_ms},
-    error::{ApiError, ApiResult},
+    error::{ApiError, ApiResult, Fail},
     release::{self, clean_hash, parse_magnet},
     scan::iso,
     tracker::{self, SHIM_INTERVAL, Source, Swarm},
@@ -159,7 +159,11 @@ pub struct Event {
     pub torrent_id: String,
     pub name: String,
     pub media: Option<Media>,
+    /// English, for the log; the UI words `code` itself.
     pub message: Option<String>,
+    /// Reason of a failure (see `error::CODES`).
+    #[serde(default)]
+    pub code: Option<String>,
 }
 
 pub struct Entry {
@@ -168,13 +172,15 @@ pub struct Entry {
     pub handle: Mutex<Option<Arc<ManagedTorrent>>>,
     pub swarm: Arc<Swarm>,
     announcer: Mutex<Option<CancellationToken>>,
-    error: Mutex<Option<String>>,
+    /// Why the last start failed. Only tunnel failures are tried again by themselves; the rest waits for
+    /// the user ("Erneut versuchen" = resume).
+    error: Mutex<Option<Fail>>,
     busy: AtomicBool,
     last_try: Mutex<Option<Instant>>,
     /// Waiting for a free download slot.
     queued: AtomicBool,
     /// The failure the user was last told about (one event per distinct error).
-    told: Mutex<Option<String>>,
+    told: Mutex<Option<Fail>>,
 }
 
 impl Entry {
@@ -575,7 +581,7 @@ impl Torrents {
 }
 
 /// Records an event for the UI and keeps the newest [`EVENTS_MAX`].
-pub fn emit(st: &AppState, kind: &str, e: &Entry, message: Option<String>) {
+pub fn emit(st: &AppState, kind: &str, e: &Entry, message: Option<String>, code: Option<&str>) {
     let tor = &st.torrents;
     let m = e.meta();
     let event = Event {
@@ -586,6 +592,7 @@ pub fn emit(st: &AppState, kind: &str, e: &Entry, message: Option<String>) {
         name: m.name,
         media: m.media,
         message,
+        code: code.map(str::to_owned),
     };
     if let Ok(data) = serde_json::to_string(&event) {
         let _ = st.db.blob_put(Table::Events, &format!("{:012}", event.id), &data);
@@ -638,19 +645,56 @@ async fn bring_up(st: Arc<AppState>, e: Arc<Entry>) {
 }
 
 /// Stores the torrent's error; a new one is told to the user once ("failed" event).
-fn set_error(st: &AppState, e: &Entry, error: Option<String>) {
+fn set_error(st: &AppState, e: &Entry, error: Option<Fail>) {
     *e.error.lock().unwrap() = error.clone();
     let Some(error) = error else { return };
-    let new = e.told.lock().unwrap().as_deref() != Some(error.as_str());
+    let new = e.told.lock().unwrap().as_ref() != Some(&error);
     if new && st.torrents.has(&e.id) {
         *e.told.lock().unwrap() = Some(error.clone());
-        emit(st, "failed", e, Some(error));
+        emit(st, "failed", e, Some(error.message), Some(error.code));
     }
 }
 
-async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String> {
+/// An engine error while loading, by its message: a full drive is said as such.
+fn engine_fail(message: String) -> Fail {
+    let m = message.to_ascii_lowercase();
+    let full = m.contains("no space") || m.contains("disk full") || m.contains("os error 112") || m.contains("os error 28");
+    Fail::new(if full { "disk_full" } else { "download_failed" }, message)
+}
+
+/// Whether the manager starts a torrent that is not in the engine: a while after the last try, and after a
+/// failure only when the failure can go away by itself (the tunnel).
+fn retry_due(error: Option<&Fail>, since_last_try: Option<Duration>) -> bool {
+    error.is_none_or(Fail::transient) && since_last_try.is_none_or(|t| t > RETRY_EVERY)
+}
+
+/// Zero-byte files of a finished torrent that were never chosen (the engine creates every file of a torrent),
+/// with the sub-folders that are empty then. Chosen files and anything with data stay. Returns the count.
+pub fn remove_empty_leftovers(m: &Meta) -> usize {
+    if m.folder.is_empty() {
+        return 0;
+    }
+    let folder = FsPath::new(&m.folder);
+    let mut removed = 0;
+    for f in m.files.iter().filter(|f| !m.selected.contains(&f.index)) {
+        let rel = FsPath::new(&f.path);
+        if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+            continue;
+        }
+        let path = folder.join(rel);
+        if std::fs::symlink_metadata(&path).is_ok_and(|d| d.is_file() && d.len() == 0) && std::fs::remove_file(&path).is_ok() {
+            removed += 1;
+            for dir in rel.ancestors().skip(1).filter(|d| !d.as_os_str().is_empty()) {
+                let _ = std::fs::remove_dir(folder.join(dir));
+            }
+        }
+    }
+    removed
+}
+
+async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), Fail> {
     let tor = &st.torrents;
-    tor.vpn.ensure_up().await?;
+    tor.vpn.ensure_up().await.map_err(Fail::vpn)?;
     tor.start_announcer(e);
     let trackers = Some(vec![shim_url()]);
 
@@ -672,10 +716,10 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
             };
             let resolved = tokio::time::timeout(METADATA_TIMEOUT, tor.session.add_torrent(AddTorrent::from_url(magnet), Some(opts)))
                 .await
-                .map_err(|_| "no peers found for this torrent (metadata timeout)".to_owned())?
-                .map_err(|err| format!("metadata: {err:#}"))?;
+                .map_err(|_| Fail::new("no_peers", "no peers found for this torrent (metadata timeout)"))?
+                .map_err(|err| Fail::new("metadata_failed", format!("metadata: {err:#}")))?;
             let AddTorrentResponse::ListOnly(list) = resolved else {
-                return Err("torrent is already known to the engine".into());
+                return Err(Fail::new("start_failed", "torrent is already known to the engine"));
             };
             let files: Vec<FileMeta> = list
                 .info
@@ -684,7 +728,7 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
                 .map(|(index, d)| FileMeta { index, path: d.filename.to_pathbuf().to_string_lossy().replace('\\', "/"), size: d.len })
                 .collect();
             let name = list.info.name().map(|n| n.to_string());
-            tokio::fs::write(&path, &list.torrent_bytes).await.map_err(|err| format!("cannot store torrent file: {err}"))?;
+            tokio::fs::write(&path, &list.torrent_bytes).await.map_err(|err| Fail::new("write_failed", format!("cannot store torrent file: {err}")))?;
             let mut m = e.meta.lock().unwrap();
             if let Some(n) = name.filter(|n| !n.is_empty()) {
                 m.name = n;
@@ -694,7 +738,7 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
         }
     };
 
-    let settings = load_settings(st).map_err(|_| "cannot read settings".to_owned())?;
+    let settings = load_settings(st).map_err(|_| Fail::new("start_failed", "cannot read settings"))?;
     let (selected, folder) = {
         let mut m = e.meta.lock().unwrap();
         if m.selected.is_empty() {
@@ -707,7 +751,7 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
     };
     persist(st, e);
     if selected.is_empty() {
-        return Err("torrent contains no files".into());
+        return Err(Fail::new("no_files", "torrent contains no files"));
     }
     // Enough room? What is on disk already (a resumed download) does not count again.
     {
@@ -719,7 +763,7 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
             .filter(|f| selected.contains(&f.index))
             .map(|f| f.size.saturating_sub(std::fs::metadata(dir.join(&f.path)).map_or(0, |d| d.len())))
             .sum();
-        check_space(free_space(&dir), need, u64::from(settings.min_free_gb) * GIB, &dir)?;
+        check_space(free_space(&dir), need, u64::from(settings.min_free_gb) * GIB, &dir).map_err(|m| Fail::new("disk_full", m))?;
     }
 
     let opts = AddTorrentOptions {
@@ -735,9 +779,9 @@ async fn bring_up_inner(st: &Arc<AppState>, e: &Arc<Entry>) -> Result<(), String
         .session
         .add_torrent(AddTorrent::from_bytes(bytes), Some(opts))
         .await
-        .map_err(|err| format!("cannot start torrent: {err:#}"))?
+        .map_err(|err| Fail::new("start_failed", format!("cannot start torrent: {err:#}")))?
         .into_handle()
-        .ok_or("cannot start torrent")?;
+        .ok_or_else(|| Fail::new("start_failed", "cannot start torrent"))?;
     // Paused or deleted while the metadata was resolving.
     let gone = !tor.entries.lock().unwrap().contains_key(&e.id);
     if gone {
@@ -825,20 +869,27 @@ pub fn spawn_manager(st: Arc<AppState>) {
                         }
                         let stats = h.stats();
                         if stats.finished {
-                            // Done: stop all peer traffic for it (no seeding).
-                            let _ = tor.session.pause(&h).await;
+                            // Done: out of the engine, so no peer traffic for it (no seeding) and its files are
+                            // closed. It plays from disk from now on, as after a restart.
                             e.stop_announcer();
-                            e.meta.lock().unwrap().completed = true;
+                            e.handle.lock().unwrap().take();
+                            let _ = tor.session.delete(h.id().into(), false).await;
+                            let m = {
+                                let mut m = e.meta.lock().unwrap();
+                                m.completed = true;
+                                m.clone()
+                            };
                             persist(&st, e);
-                            emit(&st, "finished", e, None);
+                            remove_empty_leftovers(&m);
+                            emit(&st, "finished", e, None, None);
                             continue;
                         }
                         if matches!(stats.state, TorrentStatsState::Error) {
-                            set_error(&st, e, stats.error);
+                            set_error(&st, e, stats.error.map(engine_fail));
                         }
                     }
                     None => {
-                        let due = e.last_try.lock().unwrap().is_none_or(|t| t.elapsed() > RETRY_EVERY);
+                        let due = retry_due(e.error.lock().unwrap().as_ref(), e.last_try.lock().unwrap().map(|t| t.elapsed()));
                         if due && !e.busy.load(Ordering::SeqCst) && !tor.vpn.is_blocked() {
                             tokio::spawn(bring_up(st.clone(), e.clone()));
                         }
@@ -861,6 +912,53 @@ pub fn spawn_manager(st: Arc<AppState>) {
 
 // ---------- API ----------
 
+/// What the engine says about a torrent it has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Engine {
+    Checking,
+    Live,
+    Paused,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Flags {
+    completed: bool,
+    paused: bool,
+    blocked: bool,
+    queued: bool,
+    /// The last start failed (`Entry::error`).
+    failed: bool,
+    /// A start is running right now.
+    busy: bool,
+}
+
+/// The state the UI shows. A failed start stays "error" until the user tries again (or, for a tunnel
+/// failure, until the next try is running), so it never looks like a download that is still loading.
+fn state_of(f: Flags, engine: Option<Engine>, has_files: bool) -> &'static str {
+    if f.completed {
+        return "completed";
+    }
+    if f.paused {
+        return "paused";
+    }
+    if f.blocked {
+        return "vpn_blocked";
+    }
+    if f.queued {
+        return "queued";
+    }
+    match engine {
+        Some(Engine::Checking) => "checking",
+        Some(Engine::Live) => "downloading",
+        Some(Engine::Paused) => "paused",
+        Some(Engine::Error) => "error",
+        None if f.failed && !f.busy => "error",
+        None if !has_files => "metadata",
+        None => "starting",
+    }
+}
+
 fn info(tor: &Torrents, e: &Entry) -> Value {
     let m = e.meta();
     let handle = e.handle();
@@ -868,25 +966,14 @@ fn info(tor: &Torrents, e: &Entry) -> Value {
     let error = e.error.lock().unwrap().clone();
     let busy = e.busy.load(Ordering::SeqCst);
     let queued = e.queued.load(Ordering::SeqCst);
-    let state = if m.completed {
-        "completed"
-    } else if m.paused {
-        "paused"
-    } else if tor.vpn.is_blocked() {
-        "vpn_blocked"
-    } else if queued {
-        "queued"
-    } else {
-        match stats.as_ref().map(|s| s.state) {
-            Some(TorrentStatsState::Initializing { .. }) => "checking",
-            Some(TorrentStatsState::Live) => "downloading",
-            Some(TorrentStatsState::Paused) => "paused",
-            Some(TorrentStatsState::Error) => "error",
-            None if error.is_some() && !busy => "error",
-            None if m.files.is_empty() => "metadata",
-            None => "starting",
-        }
-    };
+    let engine = stats.as_ref().map(|s| match s.state {
+        TorrentStatsState::Initializing { .. } => Engine::Checking,
+        TorrentStatsState::Live => Engine::Live,
+        TorrentStatsState::Paused => Engine::Paused,
+        TorrentStatsState::Error => Engine::Error,
+    });
+    let flags = Flags { completed: m.completed, paused: m.paused, blocked: tor.vpn.is_blocked(), queued, failed: error.is_some(), busy };
+    let state = state_of(flags, engine, !m.files.is_empty());
     let file_progress = stats.as_ref().map(|s| s.file_progress.clone()).unwrap_or_default();
     let total: u64 = m.files.iter().filter(|f| m.selected.contains(&f.index)).map(|f| f.size).sum();
     let downloaded: u64 = if m.completed {
@@ -950,7 +1037,8 @@ fn info(tor: &Torrents, e: &Entry) -> Value {
         "down_speed": down as u64, "up_speed": up as u64,
         "peers": peers, "peers_known": e.swarm.len(),
         "eta_seconds": (down > 1.0 && total > downloaded).then(|| ((total - downloaded) as f64 / down) as u64),
-        "folder": m.folder, "error": error, "added_at": iso(m.added_at),
+        "folder": m.folder, "added_at": iso(m.added_at),
+        "error": error.as_ref().map(|f| f.message.clone()), "error_code": error.as_ref().map(|f| f.code),
         "files": m.files.iter().map(|f| json!({
             "index": f.index, "name": f.path, "size": f.size,
             "path": folder.join(&f.path).to_string_lossy(),
@@ -1011,6 +1099,43 @@ pub fn add(st: &Arc<AppState>, new: NewTorrent) -> Arc<Entry> {
     e
 }
 
+/// The TMDB title a release name stands for: TMDB's first hit for its title, kept only when that hit has the
+/// same title (or original title) and, where both are known, a year at most one off.
+fn media_from_hit(r: &release::Release, hit: &Value, tv: bool) -> Option<Media> {
+    let (title, original, date) = if tv { ("name", "original_name", "first_air_date") } else { ("title", "original_title", "release_date") };
+    let want = release::normalize(&r.title);
+    let text = |k: &str| hit.get(k).and_then(Value::as_str);
+    let same = !want.is_empty() && [title, original].into_iter().any(|k| text(k).is_some_and(|t| release::normalize(t) == want));
+    let year = text(date).and_then(|d| d.get(..4)).and_then(|y| y.parse::<u32>().ok());
+    let year_ok = match (r.year, year) {
+        (Some(a), Some(b)) => a.abs_diff(b) <= 1,
+        _ => true,
+    };
+    (same && year_ok).then(|| Media {
+        kind: if tv { "tv" } else { "movie" }.into(),
+        id: hit.get("id").and_then(Value::as_u64),
+        title: text(title).unwrap_or(&r.title).to_owned(),
+        year,
+        season: r.season,
+        episode: r.episode,
+    })
+}
+
+async fn guess_media(st: &AppState, name: &str) -> Option<Media> {
+    let r = release::parse(name);
+    if r.title.trim().is_empty() {
+        return None;
+    }
+    let tv = r.season.is_some() || r.episode.is_some();
+    let mut params = vec![("query", r.title.clone()), ("include_adult", "false".to_owned())];
+    if let (Some(y), false) = (r.year, tv) {
+        params.push(("year", y.to_string()));
+    }
+    let path = if tv { "/search/tv" } else { "/search/movie" };
+    let found = tokio::time::timeout(Duration::from_secs(5), st.tmdb.get(path, &params, Some(Duration::from_secs(3600)))).await.ok()?.ok()?;
+    media_from_hit(&r, found.get("results")?.as_array()?.first()?, tv)
+}
+
 /// `POST /api/torrents/start`
 pub async fn start(State(st): St, body: Bytes) -> ApiResult<(StatusCode, Json<Value>)> {
     let req: StartReq = serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(format!("invalid body: {e}")))?;
@@ -1021,10 +1146,18 @@ pub async fn start(State(st): St, body: Bytes) -> ApiResult<(StatusCode, Json<Va
     if req.media.as_ref().is_some_and(|m| !["movie", "tv"].contains(&m.kind.as_str()) || m.title.trim().is_empty()) {
         return Err(ApiError::bad_request("media.type must be 'movie' or 'tv' and media.title is required"));
     }
-    let from_magnet = req.magnet.as_deref().map(|m| parse_magnet(m).ok_or_else(|| ApiError::bad_request("invalid magnet link"))).transpose()?;
+    let from_magnet = req
+        .magnet
+        .as_deref()
+        .map(|m| parse_magnet(m).ok_or_else(|| ApiError::coded(StatusCode::BAD_REQUEST, "invalid_magnet", "invalid magnet link")))
+        .transpose()?;
     let (id, magnet_name, mut trackers) = match (from_magnet, req.infohash.as_deref()) {
         (Some(m), _) => m,
-        (None, Some(h)) => (clean_hash(h).ok_or_else(|| ApiError::bad_request("invalid infohash"))?, None, Vec::new()),
+        (None, Some(h)) => (
+            clean_hash(h).ok_or_else(|| ApiError::coded(StatusCode::BAD_REQUEST, "invalid_infohash", "invalid infohash"))?,
+            None,
+            Vec::new(),
+        ),
         (None, None) => return Err(ApiError::bad_request("'magnet' or 'infohash' is required")),
     };
     trackers.extend(req.trackers);
@@ -1053,13 +1186,20 @@ pub async fn start(State(st): St, body: Bytes) -> ApiResult<(StatusCode, Json<Va
         }
         None => {
             let stream = mode == "stream";
+            let name = req.name.or(magnet_name).unwrap_or_else(|| id.clone());
+            // From the free search there is no title: the release name may still name one TMDB knows.
+            let media = match req.media {
+                Some(m) => Some(m),
+                None if name != id => guess_media(&st, &name).await,
+                None => None,
+            };
             let e = add(
                 &st,
                 NewTorrent {
                     id: id.clone(),
-                    name: req.name.or(magnet_name).unwrap_or_else(|| id.clone()),
+                    name,
                     mode,
-                    media: req.media,
+                    media,
                     trackers,
                     wanted,
                     priority: req.priority.unwrap_or(0),
@@ -1104,6 +1244,15 @@ async fn resume_entry(st: &Arc<AppState>, e: &Arc<Entry>) {
     persist(st, e);
     if e.meta.lock().unwrap().completed {
         return;
+    }
+    // "Erneut versuchen" after a failure: forget it, and a torrent the engine gave up on starts afresh.
+    if e.error.lock().unwrap().take().is_some() {
+        e.told.lock().unwrap().take();
+        let broken = e.handle().filter(|h| matches!(h.stats().state, TorrentStatsState::Error));
+        if let Some(h) = broken {
+            e.handle.lock().unwrap().take();
+            let _ = st.torrents.session.delete(h.id().into(), false).await;
+        }
     }
     match e.handle() {
         Some(h) if was_paused || h.is_paused() => {
@@ -1206,10 +1355,10 @@ pub async fn open_folder(State(st): St, Path(id): Path<String>) -> ApiResult<Sta
     let m = st.torrents.entry(&id)?.meta();
     let folder = PathBuf::from(&m.folder);
     if m.folder.is_empty() || !folder.is_dir() {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "the folder does not exist yet"));
+        return Err(ApiError::coded(StatusCode::NOT_FOUND, "folder_missing", "the folder does not exist yet"));
     }
     if !inside_downloads(&st, &folder) {
-        return Err(ApiError::forbidden("the folder is not inside Flimmer's download folders"));
+        return Err(ApiError::coded(StatusCode::FORBIDDEN, "folder_outside", "the folder is not inside Flimmer's download folders"));
     }
     let video = m
         .files
@@ -1252,14 +1401,14 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
     }
     for (name, dir) in [("movies_dir", &s.movies_dir), ("series_dir", &s.series_dir)] {
         if !local_path(dir) || dir.len() > 400 {
-            return Err(ApiError::bad_request(format!("{name} must be a folder on a local drive, like D:\\Filme")));
+            return Err(ApiError::coded(StatusCode::BAD_REQUEST, "folder_local", format!("{name} must be a folder on a local drive, like D:\\Filme")));
         }
     }
     if s.vpn_config.trim().is_empty() {
         return Err(ApiError::bad_request("vpn_config is required"));
     }
     if !local_path(&s.vpn_config) || s.vpn_config.len() > 400 {
-        return Err(ApiError::bad_request("vpn_config must be a file on a local drive"));
+        return Err(ApiError::coded(StatusCode::BAD_REQUEST, "folder_local", "vpn_config must be a file on a local drive"));
     }
     if s.min_free_gb > 10_000 {
         return Err(ApiError::bad_request("min_free_gb is too large"));
@@ -1545,5 +1694,79 @@ mod tests {
         let movie = files(&[("Sintel/poster.jpg", 5), ("Sintel/sintel.mp4", 129_000_000), ("Sintel/sintel.en.srt", 2)]);
         assert_eq!(choose_files(&movie, None, None), vec![1]);
         assert_eq!(choose_files(&files(&[("a.iso", 7), ("b.txt", 1)]), None, None), vec![0]);
+    }
+
+    #[test]
+    fn a_failed_start_stays_failed_and_is_not_loading() {
+        let failed = Flags { failed: true, ..Flags::default() };
+        // Metadata timeout, nothing running: "error", not "metadata" (the UI counts only loading states).
+        assert_eq!(state_of(failed, None, false), "error");
+        assert_eq!(state_of(failed, None, true), "error");
+        // The user tried again: a start is running, so it shows as starting again.
+        assert_eq!(state_of(Flags { busy: true, ..failed }, None, false), "metadata");
+        assert_eq!(state_of(Flags::default(), Some(Engine::Error), true), "error");
+        assert_eq!(state_of(Flags::default(), Some(Engine::Live), true), "downloading");
+        assert_eq!(state_of(Flags { paused: true, ..failed }, None, false), "paused");
+        assert_eq!(state_of(Flags { completed: true, ..failed }, None, true), "completed");
+
+        // Only tunnel failures are tried again by themselves.
+        let long = Some(RETRY_EVERY * 2);
+        assert!(retry_due(None, None) && retry_due(None, long) && !retry_due(None, Some(Duration::from_secs(1))));
+        assert!(!retry_due(Some(&Fail::new("no_peers", "metadata timeout")), long));
+        assert!(!retry_due(Some(&Fail::new("disk_full", "x")), None));
+        assert!(retry_due(Some(&Fail::vpn("no WireGuard handshake")), long));
+        assert_eq!(engine_fail("There is not enough space on the disk. (os error 112)".into()).code, "disk_full");
+        assert_eq!(engine_fail("piece hash mismatch".into()).code, "download_failed");
+    }
+
+    #[test]
+    fn removes_only_empty_files_that_were_not_chosen() {
+        let dir = std::env::temp_dir().join(format!("flimmer-leftovers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Subs")).unwrap();
+        std::fs::write(dir.join("sintel.mp4"), b"video").unwrap();
+        std::fs::write(dir.join("poster.jpg"), b"").unwrap();
+        std::fs::write(dir.join("Subs").join("sintel.de.srt"), b"").unwrap();
+        // Not chosen but with data (an earlier pick): stays.
+        std::fs::write(dir.join("sintel.en.srt"), b"1\n").unwrap();
+        let m = Meta {
+            id: "aa".into(),
+            name: "Sintel".into(),
+            mode: "download".into(),
+            media: None,
+            trackers: Vec::new(),
+            folder: dir.to_string_lossy().into_owned(),
+            files: files(&[("sintel.mp4", 5), ("poster.jpg", 9), ("Subs/sintel.de.srt", 9), ("sintel.en.srt", 2), ("../outside.txt", 0)]),
+            selected: vec![0],
+            wanted: None,
+            paused: false,
+            completed: true,
+            added_at: 0,
+            priority: 0,
+            auto: false,
+        };
+        assert_eq!(remove_empty_leftovers(&m), 2);
+        assert!(dir.join("sintel.mp4").is_file() && dir.join("sintel.en.srt").is_file());
+        assert!(!dir.join("poster.jpg").exists() && !dir.join("Subs").exists());
+        // A chosen file is never touched, even when empty.
+        std::fs::write(dir.join("empty.mkv"), b"").unwrap();
+        let chosen = Meta { files: files(&[("empty.mkv", 0)]), selected: vec![0], ..m };
+        assert_eq!(remove_empty_leftovers(&chosen), 0);
+        assert!(dir.join("empty.mkv").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn matches_free_search_releases_to_tmdb_titles() {
+        let sintel = json!({ "id": 45745, "title": "Sintel", "original_title": "Sintel", "release_date": "2010-09-30" });
+        let m = media_from_hit(&release::parse("Sintel"), &sintel, false).unwrap();
+        assert_eq!((m.kind.as_str(), m.id, m.year), ("movie", Some(45745), Some(2010)));
+        assert!(media_from_hit(&release::parse("Sintel.2010.1080p.mkv"), &sintel, false).is_some());
+        // Another year or another title: no guess.
+        assert!(media_from_hit(&release::parse("Sintel.1995.1080p"), &sintel, false).is_none());
+        assert!(media_from_hit(&release::parse("Sintel.The.Making.Of.2011"), &sintel, false).is_none());
+        let show = json!({ "id": 1396, "name": "Breaking Bad", "original_name": "Breaking Bad", "first_air_date": "2008-01-20" });
+        let ep = media_from_hit(&release::parse("Breaking.Bad.S01E02.1080p"), &show, true).unwrap();
+        assert_eq!((ep.kind.as_str(), ep.season, ep.episode), ("tv", Some(1), Some(2)));
     }
 }

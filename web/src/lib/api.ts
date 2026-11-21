@@ -84,7 +84,8 @@ export interface ScanResult {
   audio: Track[]
   subtitles: Track[]
   stream_id: string | null
-  error: string | null
+  /** `scan_skipped`, else none (`scan_failed`); "expired" is set by the player. The English `error` is for the log. */
+  error_code?: string | null
   /** "mp4" streams are a single file: played natively, no prefetch. */
   kind?: 'hls' | 'mp4'
 }

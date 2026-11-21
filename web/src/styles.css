@@ -3502,13 +3502,6 @@ button:disabled {
 .dl-up svg {
   transform: rotate(180deg);
 }
-.dl-error.is-disk {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--rot);
-  font-weight: 600;
-}
 .dl-resume {
   color: var(--kuehl);
   font-size: 0.8125rem;
@@ -4153,6 +4146,21 @@ button:disabled {
 .dl-error {
   color: var(--dunst);
   font-size: 0.8125rem;
+}
+.dl-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+.dl-failed .dl-error {
+  color: var(--leinwand);
+  font-size: 0.875rem;
+}
+.dl-failed-actions {
+  display: flex;
+  gap: 8px;
 }
 .dl-actions {
   display: flex;

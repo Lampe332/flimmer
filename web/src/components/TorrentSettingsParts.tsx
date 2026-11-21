@@ -157,7 +157,7 @@ export function SourceList() {
   })
   const list = sources.data ?? []
   const kind = (s: SourceInfo) =>
-    [s.anime && t('src.anime'), s.imdb && t('src.imdb'), !s.seeders && t('src.noSeeds'), !s.default_on && t('src.offByDefault')].filter(Boolean).join(' · ')
+    [s.anime && t('src.anime'), s.imdb && t('src.imdb'), !s.seeders && t('src.noSources'), !s.default_on && t('src.offByDefault')].filter(Boolean).join(' · ')
   const on = list.filter((s) => s.on).length
   return (
     <div className="src-list">

@@ -72,6 +72,9 @@ struct ScanResult {
     stream_id: Option<String>,
     kind: Option<StreamKind>,
     error: Option<String>,
+    /// `scan_skipped` for a provider left out for now; other errors are `scan_failed` to the UI.
+    #[serde(default)]
+    error_code: Option<String>,
 }
 
 impl ScanResult {
@@ -90,6 +93,7 @@ impl ScanResult {
             stream_id: None,
             kind: None,
             error: None,
+            error_code: None,
         }
     }
 }
@@ -240,6 +244,7 @@ fn skipped(src: &Source, h: Option<&Health>) -> ScanResult {
     };
     r.status = if is_error { Status::Error } else { Status::NoStream };
     r.error = Some(format!("skipped: {why} in the last {streak} scans (tried again once a day)"));
+    r.error_code = Some("scan_skipped".into());
     r
 }
 

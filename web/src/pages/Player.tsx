@@ -89,7 +89,7 @@ function TorrentStart({ r, onPlay }: { r: TorrentResult; onPlay: () => void }) {
       <Icon name="play" size={16} />
       {t('tor.playBest')}
       <span className="btn-note">
-        {[formatHeight(r.release.height), t('tor.seedsShort', { n: r.seeders })].filter(Boolean).join(' · ')}
+        {[formatHeight(r.release.height), t('tor.sourcesShort', { n: r.seeders })].filter(Boolean).join(' · ')}
       </span>
     </button>
   )
@@ -171,9 +171,9 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const results: ScanResult[] = useMemo(
     () =>
       (scan?.results ?? []).map((r) =>
-        dead.has(r.provider_id) ? { ...r, status: 'error', error: t('player.expired'), stream_id: null } : r,
+        dead.has(r.provider_id) ? { ...r, status: 'error', error_code: 'expired', stream_id: null } : r,
       ),
-    [scan, dead, t],
+    [scan, dead],
   )
   const shownScan = scan ? { ...scan, results } : undefined
   const ranked = useMemo(() => rank(results, settings.filter), [results, settings.filter])

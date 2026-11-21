@@ -61,11 +61,11 @@ export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onD
         <span className={`fact fact-quality${fit.height ? '' : ' is-miss'}`}>{quality}</span>
         <span className="trow-num">{formatBytes(r.size)}</span>
         {r.seeders_unknown && r.seeders === 0 ? (
-          <span className="trow-num trow-seeds is-low" title={t('td.seedsUnknownTitle')}>
+          <span className="trow-num trow-seeds is-low" title={t('td.sourcesUnknownTitle')}>
             <Icon name="seed" size={13} stroke={2.2} />?
           </span>
         ) : (
-          <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.seedersTitle', { n: r.seeders })}>
+          <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.sourcesTitle', { n: r.seeders })}>
             <Icon name="seed" size={13} stroke={2.2} />
             {r.seeders.toLocaleString()}
           </span>
@@ -191,7 +191,7 @@ function TorrentDetails({ id, r, known }: { id: string; r: TorrentResult; known?
   rows.push(
     [t('td.size'), formatBytes(r.size)],
     [
-      t('tf.seeders'),
+      t('tf.sources'),
       r.seeders_unknown && r.seeders === 0
         ? t('td.seedsUnknown')
         : r.sources.length > 1

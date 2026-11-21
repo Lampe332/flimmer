@@ -80,7 +80,8 @@ const DEFAULT_PREFS: Prefs = {
   autoNext: true,
   autoNextSeconds: 8,
   subLang: 'off',
-  audioLang: 'auto',
+  // The app's language where the source has it ("Deutsch" for a German UI), else the source's own pick.
+  audioLang: 'ui',
   volume: 1,
   rememberVolume: true,
   autoFullscreen: false,

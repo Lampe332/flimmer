@@ -123,7 +123,7 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
       <div className="tf-head">
         <div className="seg tf-mode" role="radiogroup" aria-label={t('tf.mode')}>
           {(['fast', 'quality'] as const).map((m) => (
-            <button key={m} type="button" role="radio" aria-checked={mode === m} className="seg-item" onClick={() => onMode(m)} title={t(m === 'fast' ? 'tf.fastHint' : 'tf.qualityHint')}>
+            <button key={m} type="button" role="radio" aria-checked={mode === m} className="seg-item" onClick={() => onMode(m)} title={t(m === 'fast' ? 'tf.fastHintSources' : 'tf.qualityHint')}>
               <Icon name={m === 'fast' ? 'bolt' : 'star'} size={14} />
               {t(m === 'fast' ? 'tf.fast' : 'tf.quality2')}
             </button>
@@ -146,7 +146,7 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
           {t('tf.reset')}
         </button>
       </div>
-      <p className="field-hint tf-mode-hint">{t(mode === 'fast' ? 'tf.fastHint' : 'tf.qualityHint')}</p>
+      <p className="field-hint tf-mode-hint">{t(mode === 'fast' ? 'tf.fastHintSources' : 'tf.qualityHint')}</p>
 
       {open && (
         <div className="tf-rows" id={id}>
@@ -167,7 +167,7 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
               </FacetRow>
             )
           })}
-          <FacetRow label={t('tf.seeders')}>
+          <FacetRow label={t('tf.sources')}>
             {SEEDERS.map((s) => (
               <button key={s} type="button" className="tf-chip" aria-pressed={filter.minSeeders === s} onClick={() => onFilter({ ...filter, minSeeders: s })}>
                 {s === 0 ? t('tf.all') : `${s}+`}
@@ -257,7 +257,7 @@ function SizeRange({ filter, onFilter }: { filter: TorrentFilter; onFilter: (f: 
 function describe(f: TorrentFilter, t: T): string {
   const parts: string[] = []
   for (const dim of FILTER_DIMS) for (const v of f.values[dim] ?? []) parts.push(valueLabel(dim, v, t))
-  if (f.minSeeders > 0) parts.push(t('tf.seedersMin', { n: f.minSeeders }))
+  if (f.minSeeders > 0) parts.push(t('tf.sourcesMin', { n: f.minSeeders }))
   if (f.minSizeGb > 0 || f.maxSizeGb > 0) parts.push(`${f.minSizeGb || 0}–${f.maxSizeGb || '∞'} GB`)
   if (f.cam) parts.push(t('tf.cam'))
   return parts.join(' · ')
@@ -281,7 +281,7 @@ export function FilterEmpty({ data, filter, onFilter }: { data: TorrentSearch; f
     const back = multi ? Math.max(0, ...counts) : counts.reduce((a, b) => a + b, 0)
     culprits.push({ label, drop: { ...filter, values: { ...filter.values, [dim]: undefined } }, back })
   }
-  if (filter.minSeeders > 0) culprits.push({ label: t('tf.seedersMin', { n: filter.minSeeders }), drop: { ...filter, minSeeders: 0 } })
+  if (filter.minSeeders > 0) culprits.push({ label: t('tf.sourcesMin', { n: filter.minSeeders }), drop: { ...filter, minSeeders: 0 } })
   if (filter.minSizeGb > 0 || filter.maxSizeGb > 0)
     culprits.push({ label: `${filter.minSizeGb || 0}–${filter.maxSizeGb || '∞'} GB`, drop: { ...filter, minSizeGb: 0, maxSizeGb: 0 } })
   // The filters whose removal alone brings results back are the ones to name.

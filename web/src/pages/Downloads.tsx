@@ -10,6 +10,7 @@ import { DirectSwitch, QueueFields } from '../components/TorrentSettingsParts'
 import { TorrentRow, VpnBadge, VpnNotice } from '../components/Torrents'
 import { useI18n, type Key } from '../i18n'
 import { api, ApiError } from '../lib/api'
+import { codeText, errorText } from '../lib/errors'
 import {
   episodeOfFile,
   formatBytes,
@@ -75,7 +76,11 @@ export default function Downloads() {
             aria-selected={tab === x.id}
             aria-controls={`dl-panel-${x.id}`}
             className="tab"
-            onClick={() => setParams(x.id === 'downloads' ? {} : { tab: x.id }, { replace: true })}
+            onClick={() => {
+              // The search keeps its words across tabs, so its results are still there on coming back.
+              const q = params.get('q')
+              setParams({ ...(x.id === 'downloads' ? {} : { tab: x.id }), ...(q ? { q } : {}) }, { replace: true })
+            }}
           >
             <Icon name={x.icon} size={16} />
             {t(x.label)}
@@ -233,12 +238,6 @@ function MaxActive({ running, waiting }: { running: number; waiting: number }) {
   )
 }
 
-/** The server's disk-space refusal in the user's language: "not enough disk space on D:: 0.7 GB needed, 369.3 GB free". */
-function diskError(error: string | null, t: (k: Key, v?: Record<string, string | number>) => string): string | null {
-  const m = error && /not enough disk space on (.+?): ([\d.]+) GB needed, ([\d.]+) GB free/.exec(error)
-  return m ? t('dl.diskFull', { drive: m[1] ?? '', need: m[2] ?? '', free: m[3] ?? '' }) : null
-}
-
 type QueueCtl = { pos: number; first: boolean; last: boolean; busy: boolean; up: () => void; down: () => void }
 
 function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: () => void; onPick: () => void; queue?: QueueCtl }) {
@@ -254,10 +253,12 @@ function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: ()
   const firstVideo = selectedVideos[0] ?? videos[0]
   const done = x.state === 'completed'
   const paused = x.state === 'paused'
+  const failed = x.state === 'error'
   const pct = Math.round(x.progress * 1000) / 10
   const eta = formatEta(x.eta_seconds)
-  const disk = x.state === 'error' ? diskError(x.error, t) : null
-  const facts = done
+  const facts = failed
+    ? [x.total > 0 && t('dl.ofTotal', { a: formatBytes(x.downloaded), b: formatBytes(x.total) })]
+    : done
     ? [formatBytes(x.total)]
     : [t('dl.ofTotal', { a: formatBytes(x.downloaded), b: formatBytes(x.total) }), eta && t('dl.eta', { eta })]
   return (
@@ -289,26 +290,29 @@ function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: ()
           <span style={{ transform: `scaleX(${x.progress})` }} />
         </div>
         <p className="dl-meta">
-          <span className={`dl-state${x.state === 'error' || x.state === 'vpn_blocked' ? ' is-bad' : ''}`}>
-            {!done && !paused && x.state !== 'error' && <span className="bars" aria-hidden="true" />}
+          <span className={`dl-state${failed || x.state === 'vpn_blocked' ? ' is-bad' : ''}`}>
+            {failed ? <Icon name="warn" size={14} /> : !done && !paused && <span className="bars" aria-hidden="true" />}
             {torrentLine(x)}
           </span>
-          {!done && <span className="dl-pct">{pct.toLocaleString(undefined, { maximumFractionDigits: 1 })} %</span>}
+          {!done && !failed && <span className="dl-pct">{pct.toLocaleString(undefined, { maximumFractionDigits: 1 })} %</span>}
           {facts.filter(Boolean).map((f) => (
             <span key={String(f)}>{f}</span>
           ))}
         </p>
-        {x.state === 'error' && x.error && (
-          <p className={`dl-error${disk ? ' is-disk' : ''}`} role={disk ? 'alert' : undefined}>
-            {disk ? (
-              <>
-                <Icon name="warn" size={15} />
-                {disk}
-              </>
-            ) : (
-              t('dl.errorHint')
-            )}
-          </p>
+        {failed && (
+          <div className="dl-failed" role="alert">
+            <p className="dl-error">{codeText(x.error_code)}</p>
+            <div className="dl-failed-actions">
+              <button type="button" className="btn btn-primary btn-s" onClick={() => act.mutate('resume')} disabled={act.isPending}>
+                <Icon name="refresh" size={15} />
+                {t('err.retry')}
+              </button>
+              <button type="button" className="btn btn-glass btn-s" onClick={onRemove}>
+                <Icon name="trash" size={15} />
+                {t('dl.removeShort')}
+              </button>
+            </div>
+          </div>
         )}
         {x.state === 'checking' && x.downloaded > 0 && <p className="dl-resume">{t('dl.resuming', { size: formatBytes(x.downloaded) })}</p>}
       </div>
@@ -330,6 +334,7 @@ function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: ()
           </Link>
         )}
         {!done &&
+          !failed &&
           (paused ? (
             <button type="button" className="icon-btn" onClick={() => act.mutate('resume')} aria-label={t('dl.resume')} title={t('dl.resume')}>
               <Icon name="play" size={15} />
@@ -571,7 +576,7 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
   ]
   const SORTS: { id: SortBy; label: Key }[] = [
     { id: 'best', label: 'ts.sortBest' },
-    { id: 'seeders', label: 'ts.sortSeeders' },
+    { id: 'seeders', label: 'ts.sortSources' },
     { id: 'quality', label: 'ts.sortQuality' },
     { id: 'size', label: 'ts.sortSize' },
   ]
@@ -638,7 +643,7 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
             {res.data.sources
               .filter((s) => s.status !== 'skipped' && s.status !== 'off')
               .map((s) => (
-                <li key={s.id} className={`ts-source is-${s.status}`} title={[s.error, `${s.ms} ms`].filter(Boolean).join(' · ')}>
+                <li key={s.id} className={`ts-source is-${s.status}`} title={`${s.ms} ms`}>
                   {sourceName(s.id)}
                   <span>{s.status === 'ok' ? s.count : s.status === 'blocked' ? t('ts.blocked') : t('ts.failed')}</span>
                 </li>
@@ -649,7 +654,7 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
           )}
           {start.isError && (
             <p className="field-error" role="alert">
-              {start.error instanceof ApiError ? (start.error.code === 'needs_vpn' ? t('direct.needsVpn') : start.error.message) : t('tor.downloadFailed')}
+              {start.error instanceof ApiError ? (start.error.code === 'needs_vpn' ? t('direct.needsVpn') : errorText(start.error)) : t('tor.downloadFailed')}
             </p>
           )}
           {shown.length === 0 ? (
@@ -771,7 +776,7 @@ function SettingsForm({ vpn }: { vpn: Vpn | undefined }) {
       <div className="set-actions">
         {save.isError && (
           <p className="field-error" role="alert">
-            {save.error instanceof ApiError ? save.error.message : t('set.saveFailed')}
+            {save.error instanceof ApiError ? errorText(save.error) : t('set.saveFailed')}
           </p>
         )}
         {save.isSuccess && !dirty && (

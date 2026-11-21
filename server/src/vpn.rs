@@ -118,6 +118,8 @@ pub struct VpnStatus {
     rx_bytes: u64,
     tx_bytes: u64,
     error: Option<String>,
+    /// Reason of `error` (`vpn_handshake`, `vpn_config` …), which the UI words itself.
+    error_code: Option<&'static str>,
     config_found: bool,
     /// Port forwarded by the VPN server for incoming peers (NAT-PMP); null = none (yet).
     forwarded_port: Option<u16>,
@@ -431,6 +433,7 @@ impl Vpn {
             rx_bytes: stats.map_or(0, |s| s.rx_bytes),
             tx_bytes: stats.map_or(0, |s| s.tx_bytes),
             error: shared.error.clone(),
+            error_code: shared.error.as_deref().map(crate::error::vpn_code),
             config_found,
             forwarded_port: tunnel.and(shared.forwarded),
             port_forward_error: tunnel.and(shared.forward_error.clone()),

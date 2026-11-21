@@ -248,7 +248,7 @@ function Folders({ heading, state, onBack, onNext }: HeadingRef & { state: Setup
       qc.setQueryData(['torrent-settings'], next)
       onNext()
     } catch (e) {
-      setError(e instanceof ApiError && /absolute/.test(e.message) ? t('ob.folderAbsolute') : t('set.saveFailed'))
+      setError(e instanceof ApiError && e.code === 'folder_local' ? t('ob.folderAbsolute') : t('set.saveFailed'))
     } finally {
       setBusy(false)
     }

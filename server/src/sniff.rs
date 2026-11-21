@@ -33,4 +33,10 @@ pub trait Sniffer: Send + Sync + 'static {
     /// when the sniffer gives up; either way it has released its page by then.
     /// `Err` means the page could not be loaded at all.
     fn sniff(&self, url: String, out: UnboundedSender<Candidate>) -> SniffFuture;
+
+    /// Empties the HTTP caches of the app's browser windows (the source search and the UI). Cookies and
+    /// stored settings stay. Ends when the browser is done.
+    fn clear_cache(&self) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+        Box::pin(async {})
+    }
 }

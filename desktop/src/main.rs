@@ -114,6 +114,8 @@ fn lock_data(data: &Path) -> Option<File> {
 static CLOSING: AtomicBool = AtomicBool::new(false);
 /// Time the page gets to send its last progress save to the in-process server before the window goes.
 const SAVE_GRACE: Duration = Duration::from_millis(400);
+/// A browser profile's caches above this are emptied on start.
+const WEBVIEW_CACHE_LIMIT: u64 = 200 * 1024 * 1024;
 
 fn fail(msg: &str) -> ! {
     // SAFETY: plain Win32 call with valid, NUL-terminated strings owned by this frame.
@@ -144,12 +146,10 @@ Flimmer is already running. Look for its window in the taskbar.")
     let port = find_port(&data.join("port")).unwrap_or_else(|e| fail(&e));
     let log = Log::open(&data.join("logs").join("desktop.log"));
     let webview_data = data.join("webview");
-    // "Cache leeren" in the settings: the source-search profile is only free before its windows exist.
-    let marker = data.join(flimmer::setup::CLEAR_SCAN_PROFILE);
-    if marker.is_file() {
-        let _ = std::fs::remove_dir_all(webview_data.join("scan"));
-        let _ = std::fs::remove_file(&marker);
-        log.line("cleared the source-search browser profile");
+    // Browser caches grow to some 300 MB per profile; before any window uses them they can simply go.
+    let freed = flimmer::paths::trim_webview_caches(&webview_data, WEBVIEW_CACHE_LIMIT);
+    if freed > 0 {
+        log.line(format_args!("browser caches emptied: {} MB", freed / 1_000_000));
     }
 
     tauri::Builder::default()

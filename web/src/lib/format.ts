@@ -70,34 +70,109 @@ export function formatMs(ms: number | null): string | null {
   return `${(ms / 1000).toLocaleString(locale(), { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s`
 }
 
-/** Playlist language codes and English names, each mapped to its text key. */
-const LANGS: [Key, string[], string][] = [
-  ['lang.de', ['de', 'ger', 'deu'], 'german'],
-  ['lang.en', ['en', 'eng'], 'english'],
-  ['lang.fr', ['fr', 'fre', 'fra'], 'french'],
-  ['lang.es', ['es', 'spa'], 'spanish'],
-  ['lang.it', ['it', 'ita'], 'italian'],
-  ['lang.ja', ['ja', 'jpn'], 'japanese'],
-  ['lang.ko', ['ko', 'kor'], 'korean'],
-  ['lang.tr', ['tr', 'tur'], 'turkish'],
-  ['lang.pt', ['pt', 'por'], 'portuguese'],
-  ['lang.ru', ['ru', 'rus'], 'russian'],
-]
+/** ISO 639-2 codes (files and playlists use them) of languages Intl names by their two-letter code. */
+const THREE: Record<string, string> = {
+  ger: 'de', deu: 'de', eng: 'en', fre: 'fr', fra: 'fr', spa: 'es', ita: 'it', jpn: 'ja', kor: 'ko', tur: 'tr',
+  por: 'pt', rus: 'ru', pol: 'pl', chi: 'zh', zho: 'zh', ara: 'ar', dut: 'nl', nld: 'nl', swe: 'sv', nor: 'no',
+  nob: 'nb', dan: 'da', fin: 'fi', hin: 'hi', hun: 'hu', cze: 'cs', ces: 'cs', gre: 'el', ell: 'el', heb: 'he',
+  tha: 'th', vie: 'vi', ukr: 'uk', rum: 'ro', ron: 'ro', ind: 'id', may: 'ms', msa: 'ms', bul: 'bg', hrv: 'hr',
+  srp: 'sr', slo: 'sk', slk: 'sk', slv: 'sl', est: 'et', lav: 'lv', lit: 'lt', per: 'fa', fas: 'fa', cat: 'ca',
+  ice: 'is', isl: 'is', tam: 'ta', tel: 'te', ben: 'bn', urd: 'ur',
+}
+/** Words in English track names that stand for a language with a region. */
+const ALIASES: Record<string, string> = { brazilian: 'pt-BR', castilian: 'es-ES', latino: 'es-419', flemish: 'nl-BE', mandarin: 'zh', cantonese: 'yue' }
 /** Playlist tags in track names, in plain words. */
 const TAGS: [RegExp, Key][] = [
-  [/\s*[[(]\s*forced\s*[\])]/i, 'track.forced'],
-  [/\s*[[(]\s*(cc|sdh)\s*[\])]/i, 'track.cc'],
+  [/\s*[[(]?\s*\bforced\b\s*[\])]?/i, 'track.forced'],
+  [/\s*[[(]?\s*\b(?:cc|sdh)\b\s*[\])]?/i, 'track.cc'],
 ]
 
-/** Readable name for a playlist track: "Italian [Forced]" → "Italienisch (nur Fremdsprache)". */
+/** "ger" → "de", "es_419" → "es-419"; null for "und" and other non-languages. */
+function langTag(lang: string): string | null {
+  const [head = '', ...rest] = lang.trim().replace(/_/g, '-').split('-')
+  const base = THREE[head.toLowerCase()] ?? head.toLowerCase()
+  if (!/^[a-z]{2,3}$/.test(base) || ['und', 'mul', 'zxx', 'mis'].includes(base)) return null
+  return [base, ...rest].join('-')
+}
+
+const namers = new Map<string, Intl.DisplayNames>()
+function languageName(tag: string, loc: string): string | null {
+  try {
+    let n = namers.get(loc)
+    if (!n) namers.set(loc, (n = new Intl.DisplayNames([loc], { type: 'language', fallback: 'none' })))
+    const name = n.of(tag)
+    return name ? name.charAt(0).toLocaleUpperCase(loc) + name.slice(1) : null
+  } catch {
+    return null
+  }
+}
+
+/** Language names (English, the language's own, the UI's) → tag, for tracks that only bring a name. */
+const byName = new Map<string, Map<string, string>>()
+function nameIndex(loc: string): Map<string, string> {
+  let m = byName.get(loc)
+  if (m) return m
+  m = new Map(Object.entries(ALIASES))
+  for (const code of new Set(Object.values(THREE))) {
+    for (const l of ['en', code, loc]) {
+      const name = languageName(code, l)?.toLowerCase()
+      if (name && !m.has(name)) m.set(name, code)
+    }
+  }
+  byName.set(loc, m)
+  return m
+}
+
+/** A language name at the start of `name` ("Spanish (Latin America)", "Deutsch [Forced]"): its tag and length. */
+function leadingLanguage(name: string, loc: string): { tag: string; len: number } | null {
+  const word = /^[\p{L}]+/u.exec(name)?.[0]
+  const tag = word && nameIndex(loc).get(word.toLowerCase())
+  return word && tag ? { tag, len: word.length } : null
+}
+
+/**
+ * Name of an audio / subtitle track in the UI language, the same way for every source: "ger", "German",
+ * "Deutsch" all read "Deutsch" in a German UI. Tags become plain words ("Italian [Forced]" → "Italienisch (nur
+ * Fremdsprache)"); other words of the name stay ("English Commentary" → "Englisch Commentary").
+ */
 export function trackLabel(track: { lang?: string | null; name?: string | null }, index: number, kind: string): string {
-  const code = track.lang?.toLowerCase()
-  const known = code ? LANGS.find(([, codes]) => codes.includes(code)) : undefined
-  let name = track.name?.trim() ?? ''
-  if (known && name.length <= 3) return t(known[0])
-  for (const [key, , english] of LANGS) name = name.replace(new RegExp(`^${english}\\b`, 'i'), t(key))
-  for (const [re, key] of TAGS) name = name.replace(re, t(key))
-  return name || (track.lang && track.lang !== 'und' ? track.lang.toUpperCase() : `${kind} ${index + 1}`)
+  const loc = locale()
+  const name = track.name?.trim() ?? ''
+  let tag = track.lang ? langTag(track.lang) : null
+  let rest = name
+  const lead = leadingLanguage(name, loc)
+  if (lead) {
+    tag ??= lead.tag
+    rest = name.slice(lead.len)
+    // "Brazilian Portuguese": the second language word adds nothing.
+    const again = leadingLanguage(rest.trimStart(), loc)
+    if (again) rest = rest.trimStart().slice(again.len)
+  } else if (tag && name.length <= 3) {
+    rest = ''
+  }
+  const lang = tag ? languageName(tag, loc) : null
+  let tags = ''
+  for (const [re, key] of TAGS) {
+    if (re.test(rest)) {
+      rest = rest.replace(re, '')
+      tags += t(key)
+    }
+  }
+  rest = rest.replace(/^[\s\-–—:|·,]+|[\s\-–—:|·,]+$/g, '')
+  // "(Latin America)" next to a name that already says the region.
+  if (lang?.includes('(') && /^\(.*\)$/.test(rest)) rest = ''
+  const base = lang ? [lang, rest].filter(Boolean).join(' ') : rest || `${kind} ${index + 1}`
+  return base + tags
+}
+
+/** Labels made unique: a second "Spanisch" becomes "Spanisch 2". */
+export function uniqueLabels(labels: string[]): string[] {
+  const seen = new Map<string, number>()
+  return labels.map((l) => {
+    const n = (seen.get(l) ?? 0) + 1
+    seen.set(l, n)
+    return n === 1 ? l : `${l} ${n}`
+  })
 }
 
 /** Short language code for badges: DE, EN, or the raw code. */

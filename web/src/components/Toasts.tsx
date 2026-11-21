@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { useI18n } from '../i18n'
+import { codeText } from '../lib/errors'
 import { refreshTorrents, torrentApi, torrentPlayPath, type TorrentEvent } from '../lib/torrents'
 import Icon from './Icon'
 
@@ -47,7 +48,7 @@ export default function Toasts() {
           <Icon name={e.kind === 'finished' ? 'check' : e.kind === 'failed' ? 'warn' : 'download'} size={18} />
           <div className="toast-body">
             <p className="toast-title">{line(e)}</p>
-            {e.kind === 'failed' && e.message && <p className="toast-text">{e.message}</p>}
+            {e.kind === 'failed' && <p className="toast-text">{codeText(e.code)}</p>}
             {e.kind === 'finished' && (
               <Link to={torrentPlayPath(e.torrent_id)} className="toast-link">
                 {t('common.play')}

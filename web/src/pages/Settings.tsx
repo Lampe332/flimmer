@@ -52,7 +52,7 @@ export default function Settings() {
       <div className="page-head">
         <div>
           <h1 className="page-title">{t('settings.title')}</h1>
-          <p className="page-sub">{t('pref.sub')}</p>
+          <p className="page-sub">{t('pref.subNote')}</p>
         </div>
       </div>
       <div className="prefs-layout">
@@ -444,7 +444,7 @@ function Torrents() {
           <div className="set-actions">
             {save.isError && (
               <p className="field-error" role="alert">
-                {save.error instanceof ApiError && /local drive|absolute/.test(save.error.message) ? t('ob.folderAbsolute') : t('set.saveFailed')}
+                {save.error instanceof ApiError && save.error.code === 'folder_local' ? t('ob.folderAbsolute') : t('set.saveFailed')}
               </p>
             )}
             {save.isSuccess && !draft && (
@@ -547,9 +547,9 @@ function Data() {
   })
   const clearCache = useMutation({
     mutationFn: setupApi.clearCache,
-    onSuccess: (r) => {
+    onSuccess: () => {
       void sizes.refetch()
-      say(true, r.scan_profile_pending ? t('pref.cacheClearedRestart') : t('pref.cacheCleared'))
+      say(true, t('pref.cacheCleared'))
     },
     onError: () => say(false, t('pref.failed')),
   })
@@ -583,7 +583,7 @@ function Data() {
     onError: () => say(false, t('pref.failed')),
   })
 
-  const cacheBytes = (sizes.data?.stream_cache_bytes ?? 0) + (sizes.data?.scan_profile_bytes ?? 0)
+  const cacheBytes = (sizes.data?.stream_cache_bytes ?? 0) + (sizes.data?.webview_bytes ?? 0)
   return (
     <Section id="daten" title={t('pref.data')} icon="folder">
       <PrefRow label={t('pref.history')} hint={t('pref.historyHint')}>
@@ -600,7 +600,7 @@ function Data() {
         label={t('pref.cache')}
         hint={
           sizes.data
-            ? t('pref.cacheSizes', { stream: formatBytes(sizes.data.stream_cache_bytes), scan: formatBytes(sizes.data.scan_profile_bytes) })
+            ? t('pref.cacheSizesWeb', { stream: formatBytes(sizes.data.stream_cache_bytes), web: formatBytes(sizes.data.webview_bytes) })
             : t('common.loading')
         }
       >

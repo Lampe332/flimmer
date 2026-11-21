@@ -30,8 +30,6 @@ const PREFS_KEY: &str = "prefs";
 const PREFS_MAX: usize = 16 * 1024;
 /// A WireGuard file is a few hundred bytes.
 const VPN_MAX: usize = 8 * 1024;
-/// Marker the desktop app looks for on start: delete the source-search browser profile, then this file.
-pub const CLEAR_SCAN_PROFILE: &str = "clear-scan-profile";
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -349,23 +347,19 @@ async fn import(State(st): St, body: Bytes) -> ApiResult<Json<Value>> {
     Ok(Json(json!({ "watchlist": watchlist.len() })))
 }
 
-fn scan_profile() -> std::path::PathBuf {
-    paths::data().join("webview").join("scan")
-}
-
 /// `GET /api/maintenance`: sizes of what "Cache leeren" removes, and where the data lives.
 async fn maintenance() -> Json<Value> {
     let data = paths::data();
     Json(json!({
         "stream_cache_bytes": paths::dir_size(&data.join("cache")),
-        "scan_profile_bytes": paths::dir_size(&scan_profile()),
-        "scan_profile_pending": data.join(CLEAR_SCAN_PROFILE).is_file(),
+        // Both browser profiles (the window and the source search): what really lies on the disk.
+        "webview_bytes": paths::dir_size(&data.join("webview")),
         "data_dir": data.to_string_lossy(),
     }))
 }
 
-/// `DELETE /api/maintenance/cache`: stream cache now (files in use stay), saved scan results and the TMDB cache now,
-/// the source-search browser profile on the next start (WebView2 holds it open while the app runs).
+/// `DELETE /api/maintenance/cache`: stream cache (files in use stay), saved scan results, the TMDB cache and the
+/// browser caches of the app's windows (cookies and stored settings stay).
 async fn cache_clear(State(st): St) -> ApiResult<Json<Value>> {
     let data = paths::data();
     let left = paths::clear_dir(&data.join("cache"));
@@ -373,12 +367,10 @@ async fn cache_clear(State(st): St) -> ApiResult<Json<Value>> {
         st.db.blob_prune(table, i64::MAX)?;
     }
     st.tmdb.clear_cache();
-    let mut pending = false;
-    if scan_profile().is_dir() {
-        std::fs::write(data.join(CLEAR_SCAN_PROFILE), b"").map_err(|_| ApiError::internal("cannot mark the profile"))?;
-        pending = true;
+    if let Some(sniffer) = &st.sniffer {
+        sniffer.clear_cache().await;
     }
-    Ok(Json(json!({ "stream_cache_bytes": left, "scan_profile_pending": pending })))
+    Ok(Json(json!({ "stream_cache_bytes": left, "webview_bytes": paths::dir_size(&data.join("webview")) })))
 }
 
 #[derive(Deserialize)]
