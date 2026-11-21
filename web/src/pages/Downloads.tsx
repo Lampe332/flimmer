@@ -7,7 +7,7 @@ import { VpnImport } from '../components/SetupParts'
 import { EmptyState, ErrorState, PageLoader } from '../components/States'
 import { FilterBar, FilterEmpty, useTorrentFilter } from '../components/TorrentFilters'
 import { DirectSwitch, QueueFields } from '../components/TorrentSettingsParts'
-import { TorrentRow, VpnBadge, VpnNotice } from '../components/Torrents'
+import { NeedsVpn, TorrentRow, VpnBadge, VpnNotice } from '../components/Torrents'
 import { useI18n, type Key } from '../i18n'
 import { api, ApiError } from '../lib/api'
 import { codeText, errorText } from '../lib/errors'
@@ -653,10 +653,14 @@ function FreeSearch({ torrents }: { torrents: Torrent[] }) {
           {res.data.total > 0 && (
             <FilterBar data={res.data} busy={res.isPlaceholderData} filter={tf.filter} mode={tf.mode} onFilter={tf.setFilter} onMode={tf.setMode} />
           )}
-          {start.isError && (
-            <p className="field-error" role="alert">
-              {start.error instanceof ApiError ? (start.error.code === 'needs_vpn' ? t('direct.needsVpn') : errorText(start.error)) : t('tor.downloadFailed')}
-            </p>
+          {start.error instanceof ApiError && start.error.code === 'needs_vpn' ? (
+            <NeedsVpn />
+          ) : (
+            start.isError && (
+              <p className="field-error" role="alert">
+                {start.error instanceof ApiError ? errorText(start.error) : t('tor.downloadFailed')}
+              </p>
+            )
           )}
           {shown.length === 0 ? (
             res.data.total > 0 && res.data.matched === 0 ? (

@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router'
 import Icon from '../components/Icon'
+import { ProtonSteps } from '../components/SetupParts'
 import { startTour } from '../components/Tour'
 import { useI18n, type Key } from '../i18n'
 import { PLAYER_KEYS } from '../lib/keys'
@@ -59,6 +60,13 @@ export default function Help() {
               <p>{t(f.a)}</p>
             </details>
           ))}
+          <details className="help-item">
+            <summary>
+              {t('vpn.howTitle')}
+              <Icon name="down" size={16} />
+            </summary>
+            <ProtonSteps />
+          </details>
         </section>
         <section className="set-card help-keys" aria-labelledby="help-keys">
           <h2 className="set-title" id="help-keys">

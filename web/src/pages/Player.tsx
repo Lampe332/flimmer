@@ -29,6 +29,7 @@ import {
   refreshTorrents,
   torrentApi,
   torrentHasLang,
+  torrentPlayPath,
   useTorrents,
   type NextFile,
   type PlayInfo,
@@ -82,10 +83,10 @@ export default function Player() {
 }
 
 /** "Play via torrent" in the stage card when no provider stream is there. */
-function TorrentStart({ r, onPlay }: { r: TorrentResult; onPlay: () => void }) {
+function TorrentStart({ r, onPlay, quiet }: { r: TorrentResult; onPlay: () => void; quiet?: boolean }) {
   const { t } = useI18n()
   return (
-    <button type="button" className="btn btn-primary" onClick={onPlay}>
+    <button type="button" className={quiet ? 'btn btn-glass' : 'btn btn-primary'} onClick={onPlay}>
       <Icon name="play" size={16} />
       {t('tor.playBest')}
       <span className="btn-note">
@@ -132,6 +133,14 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
   const saved = useQuery({ queryKey: ['settings'], queryFn: api.settings, staleTime: Infinity, retry: false })
   const progress = useProgress(type, id)
   const sniffer = caps.data?.sniffer === true
+  // In the browser (no scan) a finished download of this title is the first way to watch.
+  const local = useQuery({
+    queryKey: ['local-file', type, id, isTv ? s : undefined, isTv ? e : undefined],
+    queryFn: () => torrentApi.local(type, id, s, e),
+    enabled: caps.isFetched && !sniffer,
+    retry: false,
+  })
+  const localFile = local.data?.completed ? local.data : undefined
   const settings = draft ?? saved.data ?? DEFAULTS
 
   const save = useMutation({
@@ -504,11 +513,17 @@ function PlayerView({ type, id, s, e }: { type: MediaType; id: number; s: number
                       <span className="state-icon">
                         <Icon name="app" size={26} />
                       </span>
-                      <h2>{t('player.appOnly')}</h2>
-                      <p>{bestTorrent ? t('tor.browserText') : t('player.appOnlyText')}</p>
+                      <h2>{localFile ? t('player.localTitle') : t('player.appOnly')}</h2>
+                      <p>{localFile ? t('player.localText') : bestTorrent ? t('tor.browserText') : t('player.appOnlyText')}</p>
+                      {localFile && (
+                        <Link to={torrentPlayPath(localFile.torrent_id, localFile.file)} className="btn btn-primary">
+                          <Icon name="play" size={16} />
+                          {t('player.playDownloaded')}
+                        </Link>
+                      )}
                       {bestTorrent ? (
-                        <TorrentStart r={bestTorrent} onPlay={() => setManual(`t:${bestTorrent.infohash}`)} />
-                      ) : (
+                        <TorrentStart r={bestTorrent} quiet={!!localFile} onPlay={() => setManual(`t:${bestTorrent.infohash}`)} />
+                      ) : localFile ? null : (
                         <Link to={titlePath({ type, id })} className="btn btn-glass">
                           <Icon name="left" size={16} />
                           {t('player.backToTitle')}

@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router'
 import { PrefRow, Segmented, Toggle } from '../components/Controls'
 import Icon, { type IconName } from '../components/Icon'
 import { LanSettings, ThisDevice } from '../components/LanSettings'
-import { OpenPage, TokenField, VpnImport } from '../components/SetupParts'
+import { OpenPage, ProtonSteps, TokenField, VpnImport } from '../components/SetupParts'
 import { startTour } from '../components/Tour'
 import { VpnBadge } from '../components/Torrents'
 import { DirectSwitch, QueueFields, SourceList } from '../components/TorrentSettingsParts'
@@ -410,6 +410,7 @@ function Torrents() {
         </div>
         <VpnBadge vpn={vpn} always />
       </div>
+      {!vpn?.config_found && <ProtonSteps />}
       <VpnImport has={!!vpn?.config_found} onChange={() => refreshTorrents(qc)} />
       <DirectSwitch />
       {vpn?.config_found && (

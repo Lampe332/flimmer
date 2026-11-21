@@ -26,6 +26,25 @@ export function OpenPage({ page, label, quiet }: { page: Page; label: string; qu
   )
 }
 
+/** Where the Proton WireGuard file comes from, in three steps (same look as the TMDB steps in the setup). */
+export function ProtonSteps() {
+  const { t } = useI18n()
+  return (
+    <ol className="ob-howto proton-steps" aria-label={t('vpn.howTitle')}>
+      <li>
+        <span>{t('vpn.how1')}</span>
+      </li>
+      <li>
+        <span>{t('vpn.how2')}</span>
+        <OpenPage page="proton_wireguard" label={t('ob.vpnProton')} />
+      </li>
+      <li>
+        <span>{t('vpn.how3')}</span>
+      </li>
+    </ol>
+  )
+}
+
 const TOKEN_ERRORS: Record<TokenError, Key> = {
   format: 'ob.tokenFormat',
   api_key: 'ob.tokenApiKey',

@@ -271,11 +271,49 @@ export function VpnBadge({ vpn, always }: { vpn: Vpn | undefined; always?: boole
     )
   if (!always) return null
   const problem = vpnProblem(vpn)
+  if (problem) return <VpnProblemBadge vpn={vpn} title={t(problem.title)} />
   return (
-    <span className={`vpn-badge${problem ? ' is-problem' : ''}`} title={problem ? t(problem.title) : t('vpn.downHint')}>
+    <span className="vpn-badge" title={t('vpn.downHint')}>
       <Icon name="shield" size={15} stroke={2} />
-      {problem ? t('vpn.problemShort') : t('vpn.down')}
+      {t('vpn.down')}
     </span>
+  )
+}
+
+/** "VPN-Problem" as a button: a tap shows the reason and the way out right below it. */
+function VpnProblemBadge({ vpn, title }: { vpn: Vpn; title: string }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="vpn-badge-wrap">
+      <button type="button" className="vpn-badge is-problem" aria-expanded={open} title={title} onClick={() => setOpen((o) => !o)}>
+        <Icon name="shield" size={15} stroke={2} />
+        {t('vpn.problemShort')}
+        <Icon name="down" size={13} stroke={2} />
+      </button>
+      {open && (
+        <div className="vpn-pop" onClick={(e) => (e.target as HTMLElement).closest('a') && setOpen(false)}>
+          <VpnNotice vpn={vpn} compact />
+        </div>
+      )}
+    </span>
+  )
+}
+
+/** A torrent was refused because no VPN is set up: say so and lead straight to the setup. */
+export function NeedsVpn() {
+  const { t } = useI18n()
+  return (
+    <div className="vpn-notice" role="alert">
+      <Icon name="shield" size={18} />
+      <div>
+        <p className="vpn-notice-title">{t('vpn.missingTitle')}</p>
+        <p>{t('direct.needsVpn')}</p>
+        <Link to="/downloads?tab=einstellungen" className="btn btn-primary vpn-notice-btn">
+          {t('vpn.setup')}
+        </Link>
+      </div>
+    </div>
   )
 }
 
@@ -306,8 +344,8 @@ export function VpnNotice({ vpn, compact, noLink }: { vpn: Vpn | undefined; comp
         ) : (
           problem.title === 'vpn.missingTitle' &&
           !noLink && (
-            <Link to="/downloads?tab=einstellungen" className="vpn-notice-link">
-              {t('vpn.toSettings')}
+            <Link to="/downloads?tab=einstellungen" className="btn btn-primary vpn-notice-btn">
+              {t('vpn.setup')}
             </Link>
           )
         )}

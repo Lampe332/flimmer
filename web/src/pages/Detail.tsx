@@ -46,7 +46,9 @@ export default function Detail() {
     retry: false,
   })
   const localFile = local.data?.completed ? local.data : undefined
-  const playCls = localFile ? 'btn btn-glass btn-lg' : 'btn btn-primary btn-lg'
+  const playCls = 'btn btn-primary btn-lg'
+  // One play button: with a finished download it plays the file on disk (same episode the button names).
+  const playTo = (stream: string) => (localFile ? torrentPlayPath(localFile.torrent_id, localFile.file) : stream)
 
   if (!valid) return <NotFound />
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -102,27 +104,20 @@ export default function Detail() {
           {d.original_title && d.original_title !== d.title && <p className="detail-original">{d.original_title}</p>}
           {d.tagline && <p className="detail-tagline">{d.tagline}</p>}
           <div className="actions">
-            {localFile && (
-              <Link to={torrentPlayPath(localFile.torrent_id, localFile.file)} className="btn btn-primary btn-lg">
-                <Icon name="play" size={18} />
-                {t('detail.playLocal')}
-                {d.type === 'tv' && localEp && <span className="btn-note">{epCode(localEp.s, localEp.e)}</span>}
-              </Link>
-            )}
             {tvResume ? (
-              <Link to={playPath('tv', d.id, tvResume.s, tvResume.e)} className={playCls}>
+              <Link to={playTo(playPath('tv', d.id, tvResume.s, tvResume.e))} className={playCls}>
                 <Icon name="play" size={18} />
                 {t('home.continue')} {epCode(tvResume.s, tvResume.e)}
                 {tvStarted && <span className="btn-note">{remaining(tvStarted.position, tvStarted.duration)}</span>}
               </Link>
             ) : movieResume ? (
-              <Link to={playPath('movie', d.id)} className={playCls}>
+              <Link to={playTo(playPath('movie', d.id))} className={playCls}>
                 <Icon name="play" size={18} />
                 {t('home.continue')}
                 <span className="btn-note">{remaining(movieResume.position, movieResume.duration)}</span>
               </Link>
             ) : (
-              <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className={playCls}>
+              <Link to={playTo(playPath(d.type, d.id, firstSeason ?? 1, 1))} className={playCls}>
                 <Icon name="play" size={18} />
                 {d.type === 'tv' ? t('detail.playFirst') : t('common.play')}
               </Link>
@@ -134,10 +129,17 @@ export default function Detail() {
               </button>
             )}
             <SaveButton item={d} />
-            <button type="button" className="btn btn-glass btn-lg" onClick={() => setDownload(true)}>
-              <Icon name="download" size={18} />
-              {d.type === 'tv' && season !== undefined ? t('dl.seasonButton', { n: season }) : t('tor.download')}
-            </button>
+            {d.type === 'movie' && localFile ? (
+              <button type="button" className="btn btn-glass btn-lg" disabled>
+                <Icon name="check" size={18} />
+                {t('detail.loaded')}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-glass btn-lg" onClick={() => setDownload(true)}>
+                <Icon name="download" size={18} />
+                {d.type === 'tv' && season !== undefined ? t('dl.seasonButton', { n: season }) : t('tor.download')}
+              </button>
+            )}
           </div>
           {d.overview ? (
             <p className="detail-overview">{d.overview}</p>

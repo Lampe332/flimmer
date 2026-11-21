@@ -6,7 +6,7 @@ import { codeText } from '../../lib/errors'
 import { refreshTorrents, torrentApi, torrentLine, useTorrents, vpnProblem, type PlayInfo, type StartBody } from '../../lib/torrents'
 import Icon from '../Icon'
 import { Flicker } from '../States'
-import { VpnBadge, VpnNotice } from '../Torrents'
+import { NeedsVpn, VpnBadge, VpnNotice } from '../Torrents'
 import VideoPlayer from './VideoPlayer'
 
 type Props = {
@@ -153,6 +153,8 @@ export default function TorrentStage(p: Props) {
       <div className="stage-card" role="status">
         {problem && !tx?.peers && tx?.state !== 'completed' ? (
           <VpnNotice vpn={vpn} />
+        ) : failed instanceof ApiError && failed.code === 'needs_vpn' ? (
+          <NeedsVpn />
         ) : failed ? (
           <>
             <span className="state-icon is-warn">
@@ -162,9 +164,7 @@ export default function TorrentStage(p: Props) {
             <p>
               {failed instanceof ApiError && failed.status === 504
                 ? t('tor.slowStartText')
-                : failed instanceof ApiError && failed.code === 'needs_vpn'
-                  ? codeText(failed.code)
-                  : tx?.state === 'error' && tx.error_code
+                : tx?.state === 'error' && tx.error_code
                     ? codeText(tx.error_code)
                     : t('tor.noDataText')}
             </p>

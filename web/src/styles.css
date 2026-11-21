@@ -5641,3 +5641,39 @@ html[data-motion='reduce'] .hero-img {
   gap: 2px;
   min-width: 0;
 }
+
+/* "VPN-Problem" in the downloads head: a tap opens the reason and the way out. */
+.vpn-badge-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+button.vpn-badge {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.vpn-badge:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: 2px;
+}
+.vpn-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  width: min(340px, calc(100vw - 32px));
+  border-radius: var(--r-m);
+  background: var(--saal);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+}
+.vpn-notice .btn.vpn-notice-btn {
+  display: inline-flex;
+}
+.help-item .proton-steps {
+  padding: 4px 0 14px;
+}
+.ob-next-why {
+  margin-top: 8px;
+  text-align: right;
+}

@@ -18,6 +18,9 @@ const STEPS: { id: Step; label: Key }[] = [
   { id: 'done', label: 'ob.navDone' },
 ]
 
+/** Number shown in a step's kicker, the same as its dot in the progress bar. */
+const stepNo = (id: Step) => STEPS.findIndex((s) => s.id === id) + 1
+
 /**
  * First-run setup, full screen: language, TMDB token (required), Proton WireGuard file (optional),
  * download folders. Shown until finished; settings can open it again (`reopened`).
@@ -130,7 +133,7 @@ function Tmdb({ heading, has, onBack, onNext }: HeadingRef & { has: boolean; onB
   const [replace, setReplace] = useState(false)
   return (
     <>
-      <p className="ob-kicker">{t('ob.tmdbKicker')}</p>
+      <p className="ob-kicker">{t('ob.tmdbKicker', { n: stepNo('tmdb') })}</p>
       <h1 className="ob-title" ref={heading} tabIndex={-1}>
         {t('ob.tmdbTitle')}
       </h1>
@@ -167,12 +170,17 @@ function Tmdb({ heading, has, onBack, onNext }: HeadingRef & { has: boolean; onB
       <Nav
         onBack={onBack}
         next={
-          <button type="button" className="btn btn-primary" disabled={!ok} onClick={onNext}>
+          <button type="button" className="btn btn-primary" disabled={!ok} aria-describedby={ok ? undefined : 'ob-next-why'} onClick={onNext}>
             {t('ob.next')}
             <Icon name="right" size={16} />
           </button>
         }
       />
+      {!ok && (
+        <p className="field-hint ob-next-why" id="ob-next-why">
+          {t('ob.nextNeedsToken')}
+        </p>
+      )}
     </>
   )
 }
@@ -182,7 +190,7 @@ function Vpn({ heading, has, onBack, onNext }: HeadingRef & { has: boolean; onBa
   const [imported, setImported] = useState(has)
   return (
     <>
-      <p className="ob-kicker">{t('ob.vpnKicker')}</p>
+      <p className="ob-kicker">{t('ob.vpnKicker', { n: stepNo('vpn') })}</p>
       <h1 className="ob-title" ref={heading} tabIndex={-1}>
         {t('ob.vpnTitle')}
       </h1>
@@ -256,7 +264,7 @@ function Folders({ heading, state, onBack, onNext }: HeadingRef & { state: Setup
 
   return (
     <>
-      <p className="ob-kicker">{t('ob.foldersKicker')}</p>
+      <p className="ob-kicker">{t('ob.foldersKicker', { n: stepNo('folders') })}</p>
       <h1 className="ob-title" ref={heading} tabIndex={-1}>
         {t('ob.foldersTitle')}
       </h1>

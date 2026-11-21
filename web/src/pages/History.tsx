@@ -19,6 +19,28 @@ function dayLabel(d: Date, now: Date): string {
   return new Intl.DateTimeFormat(locale(), { weekday: 'long', day: 'numeric', month: 'long', year }).format(d)
 }
 
+/**
+ * One row per movie or episode: watching it again later (from a stream or a downloaded file) adds a
+ * new server entry, the list keeps only the newest. `same` lists every entry a row stands for, so
+ * removing the row removes all of them.
+ */
+function onePerTitle(all: HistoryEntry[]): { entries: HistoryEntry[]; same: Map<number, number[]> } {
+  const first = new Map<string, number[]>()
+  const entries: HistoryEntry[] = []
+  for (const h of all) {
+    const key = `${h.item.type}:${h.item.id}:${h.season ?? 0}:${h.episode ?? 0}`
+    const ids = first.get(key)
+    if (ids) ids.push(h.entry)
+    else {
+      first.set(key, [h.entry])
+      entries.push(h)
+    }
+  }
+  const same = new Map<number, number[]>()
+  for (const ids of first.values()) if (ids[0] !== undefined) same.set(ids[0], ids)
+  return { entries, same }
+}
+
 /** Entries grouped by local calendar day, newest day first (the server already sorts newest first). */
 function byDay(entries: HistoryEntry[]): { label: string; key: string; entries: HistoryEntry[] }[] {
   const now = new Date()
@@ -44,7 +66,7 @@ export default function History() {
   if (history.error) return <ErrorState error={history.error} onRetry={() => void history.refetch()} />
   if (history.isPending) return <PageLoader />
 
-  const entries = history.data
+  const { entries, same } = onePerTitle(history.data)
   const groups = byDay(entries)
 
   return (
@@ -87,7 +109,7 @@ export default function History() {
               <h2 className="hist-day-title">{g.label}</h2>
               <ol className="hist-list">
                 {g.entries.map((h) => (
-                  <HistoryRow key={h.entry} h={h} onRemove={() => remove.mutate(h.entry)} />
+                  <HistoryRow key={h.entry} h={h} onRemove={() => (same.get(h.entry) ?? [h.entry]).forEach((n) => remove.mutate(n))} />
                 ))}
               </ol>
             </section>
