@@ -88,7 +88,13 @@ export const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 
 // ---- screen brightness: the Android app's bridge (MainActivity), else a dark layer over the picture
 
-type ScreenBridge = { getBrightness(): number; setBrightness(value: number): void }
+type ScreenBridge = {
+  getBrightness(): number
+  setBrightness(value: number): void
+  /** Media volume of the system (0 to 1); older app builds lack it. */
+  getVolume?(): number
+  setVolume?(value: number): void
+}
 const bridge = (): ScreenBridge | undefined => (window as Window & { FlimmerScreen?: ScreenBridge }).FlimmerScreen
 
 /** True when the app can set the real screen brightness. */
@@ -106,6 +112,27 @@ export function readScreenBrightness(): number {
 export function writeScreenBrightness(value: number) {
   try {
     bridge()?.setBrightness(value)
+  } catch {
+    // the bridge is gone (page left): nothing to set
+  }
+}
+
+// ---- media volume: in the Android app the swipe moves the system's media volume (like Seanime), else video.volume
+
+/** True when the app can set the system's media volume. */
+export const hasSystemVolume = () => typeof bridge()?.setVolume === 'function'
+
+export function readSystemVolume(): number {
+  try {
+    return clamp01(bridge()?.getVolume?.() ?? 1)
+  } catch {
+    return 1
+  }
+}
+
+export function writeSystemVolume(value: number) {
+  try {
+    bridge()?.setVolume?.(clamp01(value))
   } catch {
     // the bridge is gone (page left): nothing to set
   }

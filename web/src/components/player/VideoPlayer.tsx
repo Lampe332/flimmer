@@ -175,6 +175,7 @@ export default function VideoPlayer({
   const [subs, setSubs] = useState<TrackRef[]>([])
   const [sub, setSub] = useState(-1)
   const [menu, setMenu] = useState<MenuId | null>(null)
+  const [hintGone, setHintGone] = useState(false)
   /** Phones: the slider is folded into the speaker until a tap opens it. */
   const [volOpen, setVolOpen] = useState(false)
   const volBox = useRef<HTMLDivElement>(null)
@@ -611,7 +612,7 @@ export default function VideoPlayer({
       document.removeEventListener('keydown', onKey, opts)
     }
   }, [poke])
-  const hidden = idle && (playing || coarse) && menu === null && scrub === null && !help && !volOpen
+  const hidden = idle && (playing || coarse) && menu === null && scrub === null && !help && !volOpen && !(coarse && !!resumeHint && started && !hintGone)
 
   // ---- actions ----
   const toggle = useCallback(() => {
@@ -892,7 +893,6 @@ export default function VideoPlayer({
   }, [upNext, count])
 
   // ---- "Fortgesetzt bei …" ----
-  const [hintGone, setHintGone] = useState(false)
   const showHint = !!resumeHint && started && !hintGone && !fatal && !upNext
   const hintDone = useRef(onHintDone)
   hintDone.current = onHintDone
@@ -916,6 +916,8 @@ export default function VideoPlayer({
   const pct = (seconds: number) => (duration > 0 ? clamp((seconds / duration) * 100, 0, 100) : 0)
   const ahead = buffer.data && prefetching && buffer.data.ahead_seconds > 0 ? buffer.data : null
   const activeLabel = levels.find((l) => l.id === activeLevel)?.label
+  /** Phones offer a quality only when there is a real choice: variants with the same label count once. */
+  const phoneLevels = levels.filter((l, i) => levels.findIndex((m) => m.label === l.label) === i)
   const qualityLabel =
     level === -1
       ? activeLabel
@@ -1018,7 +1020,7 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {showHint && resumeHint !== undefined && (
+      {showHint && !coarse && resumeHint !== undefined && (
         <div className="vp-resume" role="status">
           <span>{t('vp.resumed', { t: formatClock(resumeHint) })}</span>
           <button type="button" className="vp-resume-btn" onClick={restart}>
@@ -1121,6 +1123,7 @@ export default function VideoPlayer({
           menu={menu}
           setMenu={setMenu}
           backTo={backTo}
+          resume={showHint && resumeHint !== undefined ? { text: t('vp.resumed', { t: formatClock(resumeHint) }), restart: t('vp.restart'), onRestart: restart } : undefined}
           hasSubs={subs.length > 0}
           subOn={sub >= 0}
           cancelNext={() => setUpNextOff(true)}
@@ -1134,8 +1137,8 @@ export default function VideoPlayer({
           }}
           audio={audios.length > 1 ? { title: t('scan.audio'), icon: 'audio', value: audio, options: audioOptions, onPick: pickAudio } : null}
           quality={
-            levels.length > 1
-              ? { title: t('vp.quality'), icon: 'layers', value: level, options: [{ id: -1, label: t('vp.auto'), hint: activeLabel }, ...levels], onPick: pickLevel }
+            phoneLevels.length > 1
+              ? { title: t('vp.quality'), icon: 'layers', value: level, options: [{ id: -1, label: t('vp.auto'), hint: activeLabel }, ...phoneLevels], onPick: pickLevel }
               : null
           }
         />

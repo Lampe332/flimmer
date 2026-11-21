@@ -3,17 +3,9 @@
    Sizes and timing after the phone player of Seanime Mobile (components/player/phone/controls.ts sets the
    --vt-* sizes by the player's width). The picture is one big gesture target under the chrome. */
 .vp.is-touch .vp-overlay,
-.vp.is-touch .vp-resume,
 .vp.is-touch .vp-upnext,
 .vp.is-touch .vp-help {
   z-index: 3;
-}
-/* the resume hint sits under the top row, so back and settings stay reachable */
-.vp.is-touch .vp-resume {
-  top: calc(env(safe-area-inset-top) + 60px);
-}
-.vp.is-touch.is-fullscreen .vp-resume {
-  top: 60px;
 }
 .vt {
   position: absolute;
@@ -156,8 +148,11 @@
   position: absolute;
   bottom: -18px;
   font-size: 0.7rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: rgb(255 255 255 / 0.7);
+  color: #fff;
+  /* stays readable on a bright picture */
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.9), 0 0 6px rgb(0 0 0 / 0.65);
 }
 .vt-play {
   display: grid;
@@ -221,6 +216,47 @@
 }
 .vt-spacer {
   flex: 1;
+}
+/* "Resumed at …": in the bottom row between the time and the buttons, never over a control */
+.vt-resume {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+}
+.vt-resume-text {
+  overflow: hidden;
+  min-width: 0;
+  padding: 0 4px 0 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 0.85);
+}
+.vt-resume-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--lampe);
+  font-size: 0.78rem;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+.vt-resume-btn:active {
+  background: rgb(255 255 255 / 0.12);
+}
+.vt-resume-btn:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: 2px;
+}
+.vt.is-shown .vt-resume-btn {
+  pointer-events: auto;
 }
 .vt-next {
   display: inline-flex;

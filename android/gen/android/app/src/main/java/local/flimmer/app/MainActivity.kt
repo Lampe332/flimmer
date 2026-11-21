@@ -3,9 +3,12 @@ package local.flimmer.app
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -19,6 +22,8 @@ import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
@@ -49,6 +54,21 @@ class MainActivity : TauriActivity() {
         if (closed != "true") leaveFullscreen()
       }
     }
+  }
+
+  /**
+   * The WebView's own fullscreen view answers Back itself (it leaves fullscreen) before the callback above runs.
+   * In fullscreen the activity takes Back first: as a key (classic Back) and as an overlay callback (predictive Back).
+   */
+  private val overlayBack: Any? =
+    if (Build.VERSION.SDK_INT >= 33) OnBackInvokedCallback { fullscreenBack.handleOnBackPressed() } else null
+
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    if (fullscreenView != null && event.keyCode == KeyEvent.KEYCODE_BACK) {
+      if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) fullscreenBack.handleOnBackPressed()
+      return true
+    }
+    return super.dispatchKeyEvent(event)
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,6 +105,26 @@ class MainActivity : TauriActivity() {
         Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
       } catch (e: Exception) {
         0.5f
+      }
+    }
+
+    /** The phone player's volume swipe (right half): the system's media volume, 0 to 1, without the system slider. */
+    @JavascriptInterface
+    fun getVolume(): Float {
+      val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+      val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+      return if (max > 0) audio.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / max else 1f
+    }
+
+    @JavascriptInterface
+    fun setVolume(value: Float) {
+      val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+      val max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+      val step = Math.round(value.coerceIn(0f, 1f) * max)
+      try {
+        if (audio.getStreamVolume(AudioManager.STREAM_MUSIC) != step) audio.setStreamVolume(AudioManager.STREAM_MUSIC, step, 0)
+      } catch (e: SecurityException) {
+        // Do Not Disturb can forbid changing a stream: the volume stays as it is
       }
     }
 
@@ -140,6 +180,11 @@ class MainActivity : TauriActivity() {
     }
     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     onBackPressedDispatcher.addCallback(this, fullscreenBack)
+    if (Build.VERSION.SDK_INT >= 33) {
+      onBackInvokedDispatcher.registerOnBackInvokedCallback(
+        OnBackInvokedDispatcher.PRIORITY_OVERLAY, overlayBack as OnBackInvokedCallback
+      )
+    }
   }
 
   private fun leaveFullscreen() {
@@ -147,6 +192,7 @@ class MainActivity : TauriActivity() {
     (window.decorView as ViewGroup).removeView(view)
     fullscreenView = null
     fullscreenBack.remove()
+    if (Build.VERSION.SDK_INT >= 33) onBackInvokedDispatcher.unregisterOnBackInvokedCallback(overlayBack as OnBackInvokedCallback)
     fullscreenCallback?.onCustomViewHidden()
     fullscreenCallback = null
     WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())

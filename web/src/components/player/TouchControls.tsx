@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import type { T } from '../../i18n'
+import { useNavigate } from 'react-router'
 import { formatClock } from '../../lib/format'
 import Icon, { type IconName } from '../Icon'
 import Sheet, { SheetOption } from '../Sheet'
@@ -23,6 +24,9 @@ import {
   hasScreenBrightness,
   readScreenBrightness,
   writeScreenBrightness,
+  hasSystemVolume,
+  readSystemVolume,
+  writeSystemVolume,
 } from './phone/controls'
 import SettingsMenu from './phone/SettingsMenu'
 
@@ -82,8 +86,10 @@ type Props = {
   hasSubs: boolean
   subOn: boolean
   cancelNext?: () => void
-  /** Without app history the back button goes here (the title page), not home. */
+  /** The back button goes here (the title page, replacing the player entry); without it: history, else home. */
   backTo?: string
+  /** "Resumed at …" with a restart button: sits in the bottom row, the bars stay up while it shows. */
+  resume?: { text: string; restart: string; onRestart: () => void }
 }
 
 type Side = 'left' | 'right'
@@ -177,7 +183,7 @@ export default function TouchControls(p: Props) {
   }
 
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return
+    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0) || e.target !== e.currentTarget) return
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -222,11 +228,23 @@ export default function TouchControls(p: Props) {
       if (Math.abs(dy) < SWIPE_MIN || Math.abs(dy) < SWIPE_RATIO * Math.abs(dx)) return
       g.mode = 'swipe'
       g.kind = g.side === 'left' ? 'brightness' : 'volume'
-      g.from = g.kind === 'volume' ? p.volume : hasScreenBrightness() ? readScreenBrightness() : shade
+      g.from =
+        g.kind === 'volume'
+          ? hasSystemVolume()
+            ? readSystemVolume()
+            : p.volume
+          : hasScreenBrightness()
+            ? readScreenBrightness()
+            : shade
     }
     const v = clamp01(g.from - dy / (g.height * SWIPE_RANGE))
-    if (g.kind === 'volume') p.setVolume(Math.round(v * 100) / 100)
-    else if (hasScreenBrightness()) writeScreenBrightness(v)
+    if (g.kind === 'volume') {
+      if (hasSystemVolume()) {
+        // the app: the system's media volume moves, the video itself plays at full volume
+        writeSystemVolume(v)
+        if (p.volume < 1) p.setVolume(1)
+      } else p.setVolume(Math.round(v * 100) / 100)
+    } else if (hasScreenBrightness()) writeScreenBrightness(v)
     else setShade(v)
     showHud({ text: `${Math.round(v * 100)} %`, label: g.kind === 'volume' ? t('vp.volume') : t('m.brightness'), level: v })
   }
@@ -236,6 +254,13 @@ export default function TouchControls(p: Props) {
     if (!g || g.id !== e.pointerId) return
     gesture.current = null
     window.clearTimeout(longTimer.current)
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      // synthetic or already gone pointer
+    }
+    // a long press or a swipe is never the first half of a double tap
+    if (g.mode !== 'pending' || g.moved || cancelled) lastTap.current = null
     if (g.mode === 'long') {
       const el = p.media()
       if (el) el.playbackRate = g.rate
@@ -316,8 +341,24 @@ export default function TouchControls(p: Props) {
   const shownTime = p.scrub ?? p.time
   const pct = (sec: number) => (p.duration > 0 ? Math.min(100, Math.max(0, (sec / p.duration) * 100)) : 0)
   const keep = () => p.show()
+  const dropGesture = () => {
+    const g = gesture.current
+    if (g?.mode === 'long') {
+      const el = p.media()
+      if (el) el.playbackRate = g.rate
+      setHud(null)
+    }
+    gesture.current = null
+    lastTap.current = null
+    window.clearTimeout(longTimer.current)
+    window.clearTimeout(tapTimer.current)
+    tapTimer.current = undefined
+  }
+  const navigate = useNavigate()
   const close = () => {
     if (p.fullscreen) p.toggleFullscreen()
+    // the title page of this film or show, whatever page led here (replace: Back there does not return here)
+    else if (p.backTo?.startsWith('/titel/')) navigate(p.backTo, { replace: true })
     // came here from inside Flimmer (the router counts its entries): back to that page, else home
     else if (((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0) window.history.back()
     else window.location.assign(p.backTo ?? '/')
@@ -344,6 +385,7 @@ export default function TouchControls(p: Props) {
         onPointerMove={onMove}
         onPointerUp={(e) => end(e, false)}
         onPointerCancel={(e) => end(e, true)}
+        onLostPointerCapture={(e) => end(e, true)}
         onContextMenu={(e) => e.preventDefault()}
         aria-hidden="true"
       />
@@ -366,7 +408,7 @@ export default function TouchControls(p: Props) {
         </div>
       )}
 
-      <div className="vt-chrome">
+      <div className="vt-chrome" onPointerDownCapture={dropGesture}>
         <div className="vt-top" onPointerDownCapture={keep}>
           <button type="button" className="vt-btn" onClick={close} aria-label={t('m.back')}>
             <Icon name="left" size={s.icon} />
@@ -438,8 +480,20 @@ export default function TouchControls(p: Props) {
               {remaining ? `-${formatClock(p.duration - shownTime)}` : formatClock(shownTime)}
               <span className="vt-time-total"> / {formatClock(p.duration)}</span>
             </button>
-            {p.status && <span className="vt-status">{p.status}</span>}
-            <span className="vt-spacer" />
+            {p.resume ? (
+              <span className="vt-resume" role="status">
+                <span className="vt-resume-text">{p.resume.text}</span>
+                <button type="button" className="vt-resume-btn" onClick={p.resume.onRestart}>
+                  <Icon name="refresh" size={14} />
+                  {p.resume.restart}
+                </button>
+              </span>
+            ) : (
+              <>
+                {p.status && <span className="vt-status">{p.status}</span>}
+                <span className="vt-spacer" />
+              </>
+            )}
             {p.next && (
               <button type="button" className="vt-next" onClick={p.next.go} aria-label={t('vp.nextLabel', { label: p.next.label })}>
                 <Icon name="next" size={Math.max(16, s.icon - 4)} />
