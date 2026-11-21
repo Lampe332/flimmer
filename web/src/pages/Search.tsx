@@ -4,9 +4,15 @@ import ResultGrid from '../components/ResultGrid'
 import { EmptyState, ErrorState } from '../components/States'
 import { useI18n } from '../i18n'
 import { api } from '../lib/api'
+import { useIsPhone } from '../lib/platform'
 import { useTitle } from '../lib/title'
+import MobileSearch from './MobileSearch'
 
 export default function Search() {
+  return useIsPhone() ? <MobileSearch /> : <DesktopSearch />
+}
+
+function DesktopSearch() {
   const { t } = useI18n()
   const [params] = useSearchParams()
   const q = (params.get('q') ?? '').trim()

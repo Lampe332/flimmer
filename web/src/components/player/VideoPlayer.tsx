@@ -18,8 +18,10 @@ import { playUrl, subtitleUrl, torrentApi, type AudioInfo, type SubtitleInfo } f
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
 import { PLAYER_KEYS } from '../../lib/keys'
 import { getPrefs, matchesLang, usePrefs } from '../../lib/prefs'
+import { useCoarse } from '../../lib/platform'
 import Icon, { type IconName } from '../Icon'
 import { Flicker } from '../States'
+import TouchControls, { TOUCH_HIDE_MS } from './TouchControls'
 
 type Props = {
   streamId: string
@@ -178,6 +180,10 @@ export default function VideoPlayer({
   const [prefetching, setPrefetching] = useState(false)
   const [help, setHelp] = useState(false)
   const narrow = useNarrow()
+  /** A finger is the pointer: TouchControls replace the bars (desktop with a mouse keeps its own). */
+  const coarse = useCoarse()
+  const coarseRef = useRef(coarse)
+  coarseRef.current = coarse
 
   // Latest callbacks/props for the long-lived listeners below.
   const live = useRef({ onTime, onExpired, onSave, variants, startAt })
@@ -491,7 +497,8 @@ export default function VideoPlayer({
         () => {
           if (pendingSeek.current !== null) return
           const now = offset.current + el.currentTime
-          setTime(now)
+          // the clock shows whole seconds: re-render once a second instead of four times
+          setTime((was) => (Math.floor(was) === Math.floor(now) ? was : now))
           live.current.onTime(now)
           if (pos.current.played) pos.current.time = now
         },
@@ -528,15 +535,21 @@ export default function VideoPlayer({
     setIdle(false)
     window.clearTimeout(idleTimer.current)
     const arm = () => {
+      // touch: the bars stay while paused, and hide 5 s after the last touch while playing
+      if (coarseRef.current && video.current?.paused) return
       idleTimer.current = window.setTimeout(() => {
         const overBar = HOVER_MQ.matches && !!wrap.current?.querySelector('.vp-controls:hover')
         if (overBar) arm()
         else setIdle(true)
-      }, IDLE_MS)
+      }, coarseRef.current ? TOUCH_HIDE_MS : IDLE_MS)
     }
     arm()
   }, [])
   pokeRef.current = poke
+  const hideNow = useCallback(() => {
+    window.clearTimeout(idleTimer.current)
+    setIdle(true)
+  }, [])
   useEffect(() => () => window.clearTimeout(idleTimer.current), [])
 
   useEffect(() => {
@@ -556,6 +569,11 @@ export default function VideoPlayer({
     let last = 0
     let at = ''
     const onMove = (e: Event) => {
+      // touch: TouchControls decide (a tap on the picture hides the bars, it must not show them first)
+      const viaTouch =
+        (e instanceof PointerEvent && e.pointerType === 'touch') ||
+        !!(e as Event & { sourceCapabilities?: { firesTouchEvents?: boolean } }).sourceCapabilities?.firesTouchEvents
+      if (viaTouch && coarseRef.current) return
       const inside = !!document.fullscreenElement || (e.target instanceof Node && !!wrap.current?.contains(e.target))
       if (!inside) return
       // Chromium sends synthetic moves at the same spot when the content under a resting cursor changes
@@ -585,7 +603,7 @@ export default function VideoPlayer({
       document.removeEventListener('keydown', onKey, opts)
     }
   }, [poke])
-  const hidden = idle && playing && menu === null && scrub === null && !help && !volOpen
+  const hidden = idle && (playing || coarse) && menu === null && scrub === null && !help && !volOpen
 
   // ---- actions ----
   const toggle = useCallback(() => {
@@ -759,7 +777,7 @@ export default function VideoPlayer({
   useEffect(() => {
     if (menu === null) return
     const onDown = (e: PointerEvent) => {
-      if (!(e.target as HTMLElement | null)?.closest('.vp-menu')) setMenu(null)
+      if (!(e.target as HTMLElement | null)?.closest('.vp-menu, .sheet')) setMenu(null)
     }
     window.addEventListener('pointerdown', onDown)
     return () => window.removeEventListener('pointerdown', onDown)
@@ -895,10 +913,10 @@ export default function VideoPlayer({
   return (
     <div
       ref={wrap}
-      className={`vp${hidden ? ' is-idle' : ''}${fullscreen ? ' is-fullscreen' : ''}`}
+      className={`vp${hidden ? ' is-idle' : ''}${fullscreen ? ' is-fullscreen' : ''}${coarse ? ' is-touch' : ''}`}
       data-audio-track={audio}
       data-subtitle-track={sub}
-      onPointerLeave={() => playing && !document.fullscreenElement && setIdle(true)}
+      onPointerLeave={(e) => e.pointerType !== 'touch' && playing && !document.fullscreenElement && setIdle(true)}
     >
       <video
         ref={video}
@@ -928,7 +946,7 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {started && !playing && !waiting && !ended && !fatal && (
+      {started && !playing && !waiting && !ended && !fatal && !coarse && (
         <button type="button" className="vp-bigplay" onClick={toggle} aria-label={t('common.play')}>
           <Icon name="play" size={34} />
         </button>
@@ -1052,6 +1070,43 @@ export default function VideoPlayer({
         </div>
       )}
 
+      {coarse ? (
+        <TouchControls
+          t={t}
+          title={title}
+          subtitle={subtitle}
+          playing={playing}
+          busy={(waiting || !started) && !fatal && !ended}
+          time={time}
+          duration={duration}
+          buffered={buffered}
+          ahead={ahead ? { from: ahead.from_seconds, seconds: ahead.ahead_seconds } : null}
+          status={torrent?.status}
+          shown={!hidden}
+          show={poke}
+          hide={hideNow}
+          toggle={toggle}
+          seekTo={seekTo}
+          nowAt={nowAt}
+          scrub={scrub}
+          setScrub={setScrub}
+          fullscreen={fullscreen}
+          toggleFullscreen={toggleFullscreen}
+          next={next}
+          muted={vol.muted || vol.volume === 0}
+          toggleMute={toggleMute}
+          menu={menu}
+          setMenu={setMenu}
+          subs={subs.length > 0 ? { title: t('scan.subs'), icon: 'subtitles', value: sub, options: [{ id: -1, label: t('vp.off') }, ...subOptions], onPick: pickSub } : null}
+          audio={audios.length > 1 ? { title: t('scan.audio'), icon: 'audio', value: audio, options: audioOptions, onPick: pickAudio } : null}
+          quality={
+            levels.length > 0
+              ? { title: t('vp.quality'), icon: 'layers', value: level, options: [{ id: -1, label: t('vp.auto'), hint: activeLabel }, ...levels], onPick: pickLevel }
+              : null
+          }
+        />
+      ) : (
+      <>
       <div className="vp-top">
         <p className="vp-title">{title}</p>
         {subtitle && <p className="vp-subtitle">{subtitle}</p>}
@@ -1215,6 +1270,8 @@ export default function VideoPlayer({
           </button>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

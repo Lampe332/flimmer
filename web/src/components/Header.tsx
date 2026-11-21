@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { NavLink, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react'
+import { Link, NavLink, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { useI18n, type Key } from '../i18n'
 import { useNewEpisodes } from '../lib/progress'
 import { isActive, useTorrents } from '../lib/torrents'
@@ -32,6 +32,39 @@ function Badge({ to, fresh, loading }: { to: string; fresh: number; loading: num
   )
 }
 
+/**
+ * Phone tab bar: the tab lights up on touch-down and the page switches one frame later, before the finger lifts.
+ * The click that follows is swallowed; a tap on the open tab scrolls back to the top.
+ */
+function useTabPress() {
+  const navigate = useNavigate()
+  const { pathname, search } = useLocation()
+  const handled = useRef(false)
+  useEffect(() => {
+    for (const a of document.querySelectorAll<HTMLElement>('.tabbar-link[data-pending]')) delete a.dataset.pending
+  }, [pathname, search])
+  const onPointerDown = (e: PointerEvent<HTMLAnchorElement>) => {
+    handled.current = false
+    if (e.pointerType !== 'touch' || !e.isPrimary) return
+    const a = e.currentTarget
+    const to = a.getAttribute('href') ?? '/'
+    handled.current = true
+    if (to === pathname && !search) {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    for (const other of document.querySelectorAll<HTMLElement>('.tabbar-link[data-pending]')) delete other.dataset.pending
+    a.dataset.pending = '1'
+    requestAnimationFrame(() => window.setTimeout(() => navigate(to)))
+  }
+  const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (!handled.current) return
+    handled.current = false
+    e.preventDefault()
+  }
+  return { onPointerDown, onClick }
+}
+
 /** True once the page has scrolled past the top, so the bar can turn solid over content. */
 function useScrolled(): boolean {
   const [scrolled, setScrolled] = useState(false)
@@ -57,6 +90,7 @@ export default function Header() {
   const fresh = useNewEpisodes().data?.length ?? 0
   const loading = useTorrents().data?.torrents.filter(isActive).length ?? 0
   const { t } = useI18n()
+  const tabPress = useTabPress()
 
   // Keep field in sync when the URL changes (back/forward, leaving search).
   useEffect(() => {
@@ -133,6 +167,9 @@ export default function Header() {
               /
             </kbd>
           </form>
+          <Link to="/suche" className="header-icon header-search-btn" aria-label={t('nav.search')}>
+            <Icon name="search" size={22} />
+          </Link>
           <HeaderVpn />
           <SettingsMenu />
         </div>
@@ -140,7 +177,7 @@ export default function Header() {
 
       <nav className="tabbar" aria-label={t('nav.main')}>
         {NAV.map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link" data-tour={n.tour}>
+          <NavLink key={n.to} to={n.to} end={n.end} className="tabbar-link" data-tour={n.tour} {...tabPress}>
             <span className="tabbar-icon">
               <Icon name={n.icon} size={22} />
               <Badge to={n.to} fresh={fresh} loading={loading} />

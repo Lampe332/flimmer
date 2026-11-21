@@ -33,6 +33,11 @@ export type IconName =
   | 'shield'
   | 'folder'
   | 'seed'
+  | 'gear'
+  | 'globe'
+  | 'back10'
+  | 'fwd10'
+  | 'arrowLeft'
 
 const paths: Record<IconName, string> = {
   play: 'M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z',
@@ -69,6 +74,11 @@ const paths: Record<IconName, string> = {
   shield: 'M12 3.5 5 6v5.5c0 4.3 3 7.6 7 9 4-1.4 7-4.7 7-9V6ZM9 12l2.2 2.2L15.5 10',
   folder: 'M3.5 7a1.5 1.5 0 0 1 1.5-1.5h4.5l2 2.5H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5Z',
   seed: 'M12 19V6M7 10.5l5-5 5 5',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4Z',
+  globe: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18ZM3.5 9h17M3.5 15h17M12 3c-2.5 2.6-3.5 5.6-3.5 9s1 6.4 3.5 9c2.5-2.6 3.5-5.6 3.5-9S14.5 5.6 12 3Z',
+  back10: 'M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 3.5v3.2h3.2',
+  fwd10: 'M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 3.5v3.2h-3.2',
+  arrowLeft: 'M19 12H5M11 6l-6 6 6 6',
 }
 
 const filled: Partial<Record<IconName, true>> = { play: true, pause: true, next: true, star: true }

@@ -33,9 +33,19 @@ class MainActivity : TauriActivity() {
    */
   private var baseOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
-  /** Back leaves fullscreen first. Added on entering, so it comes before the WebView's "go back". */
+  private var webView: WebView? = null
+
+  /**
+   * Back in fullscreen: an open sheet of the player closes first (the page answers `flimmerBack()` with true),
+   * then fullscreen ends. Added on entering, so it comes before the WebView's "go back".
+   */
   private val fullscreenBack = object : OnBackPressedCallback(true) {
-    override fun handleOnBackPressed() = leaveFullscreen()
+    override fun handleOnBackPressed() {
+      val view = webView ?: return leaveFullscreen()
+      view.evaluateJavascript("!!(window.flimmerBack && window.flimmerBack())") { closed ->
+        if (closed != "true") leaveFullscreen()
+      }
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,6 +70,7 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onWebViewCreate(webView: WebView) {
+    this.webView = webView
     // After the WebView has its own chrome client (file picker, dialogs): wrap it to add real fullscreen.
     webView.post {
       val inner = webView.webChromeClient

@@ -4,6 +4,8 @@ import { locale } from '../lib/format'
 import { EMPTY_FILTER, FILTER_DIMS, setPrefs, usePrefs, type FilterDim, type TorrentFilter, type TorrentMode } from '../lib/prefs'
 import { filterParams, type Facets, type TorrentSearch } from '../lib/torrents'
 import Icon from './Icon'
+import Sheet from './Sheet'
+import { useIsPhone } from '../lib/platform'
 
 /** The saved torrent filter and order (prefs, so it is the user's default everywhere). */
 export function useTorrentFilter() {
@@ -106,7 +108,9 @@ type BarProps = {
 /** Filter chips with live counts from the API, the order switch and "Zurücksetzen". */
 export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact }: BarProps) {
   const { t } = useI18n()
-  const [open, setOpen] = useState(!compact)
+  // phones: the filters open as a bottom sheet, folded by default
+  const phone = useIsPhone()
+  const [open, setOpen] = useState(!compact && !phone)
   const id = useId()
   const facets: Facets = data?.facets ?? {}
   const n = activeCount(filter)
@@ -117,6 +121,7 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
   }
   const camCount = facets.cam?.true ?? 0
   const summary = describe(filter, t)
+  const rows = <FilterRows id={id} facets={facets} filter={filter} onFilter={onFilter} toggle={toggle} camCount={camCount} t={t} />
 
   return (
     <section className={`tf${compact ? ' is-compact' : ''}${busy ? ' is-busy' : ''}`} aria-label={t('tf.title')}>
@@ -129,7 +134,14 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
             </button>
           ))}
         </div>
-        <button type="button" className={`tf-toggle${n > 0 ? ' has-active' : ''}`} aria-expanded={open} aria-controls={id} onClick={() => setOpen((o) => !o)}>
+        <button
+          type="button"
+          className={`tf-toggle${n > 0 ? ' has-active' : ''}`}
+          aria-expanded={open}
+          aria-controls={phone ? undefined : id}
+          aria-haspopup={phone ? 'dialog' : undefined}
+          onClick={() => setOpen((o) => !o)}
+        >
           <Icon name="sliders" size={15} />
           <span className="tf-toggle-text">{n > 0 ? summary : t('tf.title')}</span>
           {n > 0 && <span className="tf-badge">{n}</span>}
@@ -148,7 +160,35 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
       </div>
       <p className="field-hint tf-mode-hint">{t(mode === 'fast' ? 'tf.fastHint' : 'tf.qualityHint')}</p>
 
-      {open && (
+      {phone ? (
+        <Sheet open={open} onClose={() => setOpen(false)} title={t('tf.title')} className="tf-sheet">
+          {rows}
+          <div className="sheet-actions">
+            <button type="button" className="btn btn-glass" onClick={() => onFilter(EMPTY_FILTER)} disabled={n === 0}>
+              {t('tf.reset')}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => setOpen(false)}>
+              {data ? t('tf.matched', { a: data.matched.toLocaleString(locale()), b: data.total.toLocaleString(locale()) }) : t('m.done')}
+            </button>
+          </div>
+        </Sheet>
+      ) : (
+        open && rows
+      )}
+    </section>
+  )
+}
+
+function FilterRows({ id, facets, filter, onFilter, toggle, camCount, t }: {
+  id: string
+  facets: Facets
+  filter: TorrentFilter
+  onFilter: (next: TorrentFilter) => void
+  toggle: (dim: FilterDim, value: string) => void
+  camCount: number
+  t: T
+}) {
+  return (
         <div className="tf-rows" id={id}>
           {ROWS.map((row) => {
             const parts = row.dims.map((dim) => ({ dim, list: ordered(dim, facets[dim] ?? {}, filter.values[dim] ?? []) }))
@@ -178,8 +218,6 @@ export function FilterBar({ data, busy, filter, mode, onFilter, onMode, compact 
             <SizeRange filter={filter} onFilter={onFilter} />
           </FacetRow>
         </div>
-      )}
-    </section>
   )
 }
 

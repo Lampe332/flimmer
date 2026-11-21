@@ -15,7 +15,12 @@ export default function SettingsMenu() {
         aria-label={t('settings.open', { lang: current.name })}
         title={t('settings.title')}
       >
-        <Icon name="sliders" size={18} />
+        <span className="settings-ico-desk">
+          <Icon name="sliders" size={18} />
+        </span>
+        <span className="settings-ico-phone">
+          <Icon name="gear" size={22} />
+        </span>
         <span className="settings-code" aria-hidden="true">
           {current.id.toUpperCase()}
         </span>

@@ -11,7 +11,9 @@ import { LANGUAGES, useI18n, type Key } from '../i18n'
 import { ApiError, api, type AudioLang, type MinHeight, type Settings as ScanSettings, type SortKey } from '../lib/api'
 import { ACCENTS, COUNTDOWNS, START_PAGES, loadPrefs, resetLocalPrefs, setPrefs, usePrefs, type Accent } from '../lib/prefs'
 import { fileAccept, readTextFile, setupApi, useSetup, type Page } from '../lib/setup'
+import { useIsPhone } from '../lib/platform'
 import { formatBytes, refreshTorrents, torrentApi, useTorrents, type TorrentSettings } from '../lib/torrents'
+import MobileSettings, { type MobileSection } from './MobileSettings'
 
 const SECTIONS: { id: string; label: Key; icon: IconName }[] = [
   { id: 'allgemein', label: 'pref.general', icon: 'sliders' },
@@ -37,8 +39,21 @@ function Section({ id, title, icon, children }: { id: string; title: string; ico
   )
 }
 
+/** The same sections as a list of pages on a phone (summary = the line under each entry). */
+const PHONE_SECTIONS: MobileSection[] = [
+  { id: 'allgemein', label: 'pref.general', icon: 'sliders', summary: 'm.sumGeneral', Body: () => <General /> },
+  { id: 'player', label: 'pref.player', icon: 'play', summary: 'm.sumPlayer', Body: () => <Player /> },
+  { id: 'quellen', label: 'pref.sources', icon: 'layers', summary: 'm.sumSources', Body: () => <Sources /> },
+  { id: 'torrents', label: 'pref.torrents', icon: 'download', summary: 'm.sumTorrents', Body: () => <Torrents /> },
+  { id: 'tmdb', label: 'pref.tmdb', icon: 'film', summary: 'm.sumTmdb', Body: () => <Tmdb /> },
+  { id: 'daten', label: 'pref.data', icon: 'folder', summary: 'm.sumData', Body: () => <Data /> },
+  { id: 'info', label: 'pref.about', icon: 'info', summary: 'm.sumAbout', Body: () => <About /> },
+]
+
 export default function Settings() {
   const { t } = useI18n()
+  const phone = useIsPhone()
+  if (phone) return <MobileSettings sections={PHONE_SECTIONS} />
   return (
     <div className="page prefs">
       <div className="page-head">

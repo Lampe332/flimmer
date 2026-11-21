@@ -25,6 +25,24 @@ const Settings = lazy(() => import('./pages/Settings'))
 const Help = lazy(() => import('./pages/Help'))
 const Onboarding = lazy(() => import('./pages/Onboarding'))
 
+/** The pages behind the tab bar, fetched while the app is idle so the first tap does not wait for a chunk. */
+function usePrefetchPages() {
+  useEffect(() => {
+    const load = () => {
+      void import('./pages/Browse')
+      void import('./pages/Watchlist')
+      void import('./pages/History')
+      void import('./pages/Downloads')
+      void import('./pages/Search')
+      void import('./pages/Detail')
+      void import('./pages/Settings')
+    }
+    const idle = window.requestIdleCallback ?? ((fn: () => void) => window.setTimeout(fn, 1500))
+    const id = idle(load)
+    return () => (window.cancelIdleCallback ?? window.clearTimeout)(id)
+  }, [])
+}
+
 /** Scroll position per history entry, so "back" lands where you left the page. */
 const positions = new Map<string, number>()
 
@@ -106,6 +124,7 @@ export default function App() {
   const { t } = useI18n()
   const gate = useSetupGate()
   const immersive = pathname.startsWith('/play/')
+  usePrefetchPages()
   if (gate.setup.isPending) return <PageLoader />
   if (gate.show && gate.setup.data)
     return (
@@ -114,7 +133,7 @@ export default function App() {
       </Suspense>
     )
   return (
-    <div className={`app${immersive ? ' is-immersive' : ''}`}>
+    <div className={`app${immersive ? ' is-immersive' : ''}${pathname === '/suche' ? ' is-search' : ''}`}>
       <a href="#main" className="skip-link">
         {t('app.skip')}
       </a>
