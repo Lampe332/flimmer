@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { useI18n } from '../i18n'
@@ -7,6 +7,27 @@ import { refreshTorrents, torrentApi, torrentPlayPath, type TorrentEvent } from 
 import Icon from './Icon'
 
 const SHOW_MS = 7000
+const UNDO_MS = 5000
+
+type Undo = { id: number; text: string; undo: () => void }
+let undoNow: Undo | null = null
+const undoSubs = new Set<() => void>()
+const setUndo = (u: Undo | null) => {
+  undoNow = u
+  undoSubs.forEach((f) => f())
+}
+/** "Entfernt: Dune" with "Rückgängig" for 5 s; a newer one replaces it. */
+export function showUndo(text: string, undo: () => void) {
+  setUndo({ id: Date.now(), text, undo })
+}
+const useUndo = () =>
+  useSyncExternalStore(
+    (on) => {
+      undoSubs.add(on)
+      return () => undoSubs.delete(on)
+    },
+    () => undoNow,
+  )
 
 /**
  * Torrent events as toasts: "Fertig: …", "Fehlgeschlagen: …", "Automatisch geladen: …". Only events that happen
@@ -17,6 +38,14 @@ export default function Toasts() {
   const qc = useQueryClient()
   const since = useRef<number | null>(null)
   const [shown, setShown] = useState<TorrentEvent[]>([])
+  const undo = useUndo()
+  useEffect(() => {
+    if (!undo) return
+    const timer = window.setTimeout(() => {
+      if (undoNow?.id === undo.id) setUndo(null)
+    }, UNDO_MS)
+    return () => window.clearTimeout(timer)
+  }, [undo])
   const events = useQuery({
     queryKey: ['torrent-events'],
     queryFn: () => torrentApi.events(since.current ?? 0),
@@ -40,9 +69,30 @@ export default function Toasts() {
   }, [shown])
 
   const line = (e: TorrentEvent) => t(e.kind === 'finished' ? 'toast.finished' : e.kind === 'failed' ? 'toast.failed' : 'toast.grabbed', { name: label(e) })
-  if (shown.length === 0) return null
+  if (shown.length === 0 && !undo) return null
   return (
     <div className="toasts" role="status" aria-live="polite">
+      {undo && (
+        <div key={`undo-${undo.id}`} className="toast is-undo">
+          <Icon name="trash" size={18} />
+          <div className="toast-body">
+            <p className="toast-title">{undo.text}</p>
+            <button
+              type="button"
+              className="toast-link"
+              onClick={() => {
+                setUndo(null)
+                undo.undo()
+              }}
+            >
+              {t('wl.undo')}
+            </button>
+          </div>
+          <button type="button" className="icon-btn toast-close" onClick={() => setUndo(null)} aria-label={t('toast.close')}>
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+      )}
       {shown.map((e) => (
         <div key={e.id} className={`toast is-${e.kind}`}>
           <Icon name={e.kind === 'finished' ? 'check' : e.kind === 'failed' ? 'warn' : 'download'} size={18} />

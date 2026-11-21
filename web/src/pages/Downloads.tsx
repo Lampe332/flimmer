@@ -35,15 +35,17 @@ import { useRole } from '../lib/session'
 import { useTitle } from '../lib/title'
 
 type Tab = 'downloads' | 'suche' | 'automatisch' | 'einstellungen'
-const TABS: { id: Tab; label: Key; icon: 'download' | 'search' | 'sliders' | 'clock' }[] = [
-  { id: 'downloads', label: 'dl.tabList', icon: 'download' },
-  { id: 'suche', label: 'dl.tabSearch', icon: 'search' },
-  { id: 'automatisch', label: 'dl.tabAuto', icon: 'clock' },
-  { id: 'einstellungen', label: 'dl.tabSettings', icon: 'sliders' },
+/** `short`: the word under the icon on a phone, where four full labels do not fit next to each other. */
+const TABS: { id: Tab; label: Key; short: Key; icon: 'download' | 'search' | 'sliders' | 'clock' }[] = [
+  { id: 'downloads', label: 'dl.tabList', short: 'dl.tabListShort', icon: 'download' },
+  { id: 'suche', label: 'dl.tabSearch', short: 'dl.tabSearchShort', icon: 'search' },
+  { id: 'automatisch', label: 'dl.tabAuto', short: 'dl.tabAutoShort', icon: 'clock' },
+  { id: 'einstellungen', label: 'dl.tabSettings', short: 'dl.tabSettingsShort', icon: 'sliders' },
 ]
 
 export default function Downloads() {
   const { t } = useI18n()
+  const phone = useIsPhone()
   const [params, setParams] = useSearchParams()
   const raw = params.get('tab')
   // Folders, VPN and auto-download rules belong to the PC: a paired phone gets the list and the search.
@@ -86,8 +88,17 @@ export default function Downloads() {
             }}
           >
             <Icon name={x.icon} size={16} />
-            {t(x.label)}
-            {x.id === 'downloads' && torrents.length > 0 && <span className="tab-count">{torrents.length}</span>}
+            {phone ? (
+              <span className="tab-word">
+                {t(x.short)}
+                {x.id === 'downloads' && torrents.length > 0 && <span className="tab-count"> {torrents.length}</span>}
+              </span>
+            ) : (
+              <>
+                {t(x.label)}
+                {x.id === 'downloads' && torrents.length > 0 && <span className="tab-count">{torrents.length}</span>}
+              </>
+            )}
           </button>
         ))}
       </div>

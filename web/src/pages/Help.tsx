@@ -4,6 +4,15 @@ import { ProtonSteps } from '../components/SetupParts'
 import { startTour } from '../components/Tour'
 import { useI18n, type Key } from '../i18n'
 import { PLAYER_KEYS } from '../lib/keys'
+import { useCoarse, useIsPhone } from '../lib/platform'
+
+/** On a phone the player is used with fingers, so the help shows these instead of the keyboard shortcuts. */
+const GESTURES: { id: string; how: Key; what: Key }[] = [
+  { id: 'tap', how: 'help.gTap', what: 'help.gTapWhat' },
+  { id: 'double', how: 'help.gDouble', what: 'help.gDoubleWhat' },
+  { id: 'scrub', how: 'help.gScrub', what: 'help.gScrubWhat' },
+  { id: 'subs', how: 'help.gSubs', what: 'help.gSubsWhat' },
+]
 
 const FAQ: { q: Key; a: Key }[] = [
   { q: 'help.q1', a: 'help.a1' },
@@ -17,6 +26,9 @@ const FAQ: { q: Key; a: Key }[] = [
 export default function Help() {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const coarse = useCoarse()
+  const phone = useIsPhone()
+  const touch = coarse || phone
   const keys: { id: string; keys: string; what: string }[] = [
     { id: 'search', keys: '/', what: t('help.keySearch') },
     ...PLAYER_KEYS.map((k) => ({ id: k.id, keys: k.keys.startsWith('vp.') ? t(k.keys as Key) : k.keys, what: t(k.what) })),
@@ -68,6 +80,21 @@ export default function Help() {
             <ProtonSteps />
           </details>
         </section>
+        {touch ? (
+          <section className="set-card help-keys" aria-labelledby="help-gestures">
+            <h2 className="set-title" id="help-gestures">
+              {t('help.gestures')}
+            </h2>
+            <dl className="vp-help-list help-gestures">
+              {GESTURES.map((g) => (
+                <div key={g.id}>
+                  <dt>{t(g.how)}</dt>
+                  <dd>{t(g.what)}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : (
         <section className="set-card help-keys" aria-labelledby="help-keys">
           <h2 className="set-title" id="help-keys">
             {t('vp.shortcuts')}
@@ -88,6 +115,7 @@ export default function Help() {
             ))}
           </dl>
         </section>
+        )}
       </div>
     </div>
   )

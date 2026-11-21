@@ -24,6 +24,7 @@ export type IconName =
   | 'audio'
   | 'layers'
   | 'info'
+  | 'help'
   | 'bolt'
   | 'warn'
   | 'app'
@@ -65,6 +66,7 @@ const paths: Record<IconName, string> = {
   audio: 'M4 10v4M8 6.5v11M12 9v6M16 5v14M20 10v4',
   layers: 'M12 4 3.5 8.5 12 13l8.5-4.5ZM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5',
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18ZM12 11v5.5M12 7.6v.2',
+  help: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18ZM9.6 9.4a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.6M12 16.6v.2',
   bolt: 'M13 3 5 13.5h6L10.5 21 19 10h-6Z',
   warn: 'M12 4 2.8 19.5h18.4ZM12 10v4.5M12 17.3v.2',
   app: 'M3.5 5h17v11h-17zM9 20h6M12 16v4',

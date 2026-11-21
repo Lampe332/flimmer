@@ -75,8 +75,13 @@ impl Tmdb {
     /// GET `path` with `language` plus `params`. `ttl = None` bypasses the cache.
     /// The language is part of the cache key, so each language is cached separately.
     pub async fn get(&self, path: &str, params: &[(&str, String)], ttl: Option<Duration>) -> ApiResult<Value> {
+        self.get_in(&self.language(), path, params, ttl).await
+    }
+
+    /// Like `get`, in the given `language` instead of the request's.
+    pub async fn get_in(&self, language: &str, path: &str, params: &[(&str, String)], ttl: Option<Duration>) -> ApiResult<Value> {
         let mut query: Vec<(&str, String)> = Vec::with_capacity(params.len() + 1);
-        query.push(("language", self.language()));
+        query.push(("language", language.to_string()));
         query.extend(params.iter().cloned());
 
         let key = format!(

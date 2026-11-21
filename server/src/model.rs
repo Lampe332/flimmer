@@ -358,3 +358,33 @@ pub fn season_from(v: &Value) -> Option<SeasonDetails> {
         episodes,
     })
 }
+
+fn is_latin(c: char) -> bool {
+    c.is_ascii_alphabetic() || ('\u{00C0}'..='\u{024F}').contains(&c) || ('\u{1E00}'..='\u{1EFF}').contains(&c)
+}
+
+/// True when `title` has letters of a script the app language `lang` ("de-DE") does not use: Chinese or Korean on a
+/// German page. Russian also reads Latin; Japanese, Chinese and Korean pages keep every title.
+pub fn foreign_script(title: &str, lang: &str) -> bool {
+    let readable: fn(char) -> bool = match lang.split('-').next().unwrap_or("") {
+        "ja" | "zh" | "ko" => return false,
+        "ru" => |c| is_latin(c) || ('\u{0400}'..='\u{04FF}').contains(&c),
+        _ => is_latin,
+    };
+    title.chars().any(|c| c.is_alphabetic() && !readable(c))
+}
+
+#[cfg(test)]
+mod script_tests {
+    use super::foreign_script;
+
+    #[test]
+    fn foreign_titles() {
+        assert!(foreign_script("两京十五日", "de-DE"));
+        assert!(foreign_script("굿파트너", "en-US"));
+        assert!(!foreign_script("Die Schöne und das Biest: Ça, 2", "de-DE"));
+        assert!(!foreign_script("Брат", "ru-RU"));
+        assert!(foreign_script("Брат", "fr-FR"));
+        assert!(!foreign_script("굿파트너", "ja-JP"));
+    }
+}

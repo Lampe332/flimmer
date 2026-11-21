@@ -47,7 +47,7 @@ function Section({ id, title, icon, children }: { id: string; title: string; ico
 /** The same sections as a list of pages on a phone (summary = the line under each entry); same pc/device split. */
 function phoneSections(device: boolean, name: string | null): MobileSection[] {
   const all: (MobileSection & { pc?: boolean; device?: boolean })[] = [
-    { id: 'allgemein', label: 'pref.general', icon: 'sliders', summary: 'm.sumGeneral', Body: () => <General device={device} /> },
+    { id: 'allgemein', label: 'pref.general', icon: 'sliders', summary: 'm.sumGeneral', Body: () => <General device={device} phone /> },
     { id: 'player', label: 'pref.player', icon: 'play', summary: 'm.sumPlayer', Body: () => <Player /> },
     { id: 'quellen', label: 'pref.sources', icon: 'layers', summary: 'm.sumSources', Body: () => <Sources /> },
     { id: 'torrents', label: 'pref.torrents', icon: 'download', summary: 'm.sumTorrents', Body: () => <Torrents />, pc: true },
@@ -90,7 +90,7 @@ export default function Settings() {
             </button>
           ))}
           <Link to="/hilfe" className="prefs-nav-link">
-            <Icon name="info" size={16} />
+            <Icon name="help" size={16} />
             {t('help.title')}
           </Link>
         </nav>
@@ -119,24 +119,27 @@ export default function Settings() {
   )
 }
 
-function General({ device }: { device: boolean }) {
+/** `phone`: the phone list has its own language row, so the group leaves it out. */
+function General({ device, phone = false }: { device: boolean; phone?: boolean }) {
   const { t, lang, setLang } = useI18n()
   const prefs = usePrefs()
   const navigate = useNavigate()
   return (
     <Section id="allgemein" title={t('pref.general')} icon="sliders">
-      <PrefRow label={t('settings.language')} hint={t('settings.languageHint')} htmlFor="pref-lang">
-        <span className="select">
-          <select id="pref-lang" value={lang} onChange={(e) => setLang(e.target.value as typeof lang)}>
-            {LANGUAGES.map((l) => (
-              <option key={l.id} value={l.id} lang={l.locale}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-          <Icon name="down" size={14} />
-        </span>
-      </PrefRow>
+      {!phone && (
+        <PrefRow label={t('settings.language')} hint={t('settings.languageHint')} htmlFor="pref-lang">
+          <span className="select">
+            <select id="pref-lang" value={lang} onChange={(e) => setLang(e.target.value as typeof lang)}>
+              {LANGUAGES.map((l) => (
+                <option key={l.id} value={l.id} lang={l.locale}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+            <Icon name="down" size={14} />
+          </span>
+        </PrefRow>
+      )}
       <PrefRow label={t('pref.start')} hint={t('pref.startHint')}>
         <Segmented
           label={t('pref.start')}

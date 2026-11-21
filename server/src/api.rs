@@ -189,13 +189,33 @@ async fn home(State(st): St) -> ApiResult<Json<Home>> {
         t.get("/movie/top_rated", &region, Some(TTL_LIST)),
         t.get("/tv/top_rated", &[], Some(TTL_LIST)),
     );
+    let mut trending = model::items_from(&trending?, None);
+    readable_titles(t, &mut trending).await;
     Ok(Json(Home {
-        trending: model::items_from(&trending?, None),
+        trending,
         popular_movies: model::items_from(&pm?, Some(MediaType::Movie)),
         popular_tv: model::items_from(&ptv?, Some(MediaType::Tv)),
         top_rated_movies: model::items_from(&tm?, Some(MediaType::Movie)),
         top_rated_tv: model::items_from(&ttv?, Some(MediaType::Tv)),
     }))
+}
+
+/// TMDB falls back to the original title when there is no translation ("两京十五日" on a German page). Such a title in a
+/// script the app language does not use gets the English title instead, when that one is readable.
+async fn readable_titles(t: &Tmdb, items: &mut [Item]) {
+    let lang = t.language();
+    if !items.iter().any(|i| model::foreign_script(&i.title, &lang)) {
+        return;
+    }
+    let Ok(en) = t.get_in("en-US", "/trending/all/day", &[], Some(TTL_LIST)).await else { return };
+    let en = model::items_from(&en, None);
+    for it in items.iter_mut().filter(|i| model::foreign_script(&i.title, &lang)) {
+        if let Some(e) = en.iter().find(|e| e.id == it.id && e.kind == it.kind)
+            && !model::foreign_script(&e.title, &lang)
+        {
+            it.title = e.title.clone();
+        }
+    }
 }
 
 async fn list(State(st): St, Path((ty, list)): Path<(String, String)>, Query(q): Params) -> ApiResult<Json<Page>> {

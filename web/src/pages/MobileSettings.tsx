@@ -66,7 +66,7 @@ export default function MobileSettings({ sections }: { sections: MobileSection[]
         <li>
           <Link to="/hilfe" className="mlist-row">
             <span className="mlist-icon">
-              <Icon name="info" size={20} />
+              <Icon name="help" size={20} />
             </span>
             <span className="mlist-text">
               <span className="mlist-label">{t('help.title')}</span>

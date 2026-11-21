@@ -4559,8 +4559,15 @@ button:disabled {
   .tabbar-link:focus-visible {
     outline-offset: -4px;
   }
+  /* At most ~45 % of the screen: "Weiterschauen" stays in the first view. */
   .hero {
-    min-height: clamp(520px, 80svh, 700px);
+    min-height: clamp(300px, 45svh, 420px);
+    gap: 14px;
+    padding: calc(var(--header-h) + 12px) var(--gutter) 16px;
+  }
+  .hero-title {
+    margin: 8px 0 10px;
+    font-size: clamp(1.6rem, 7.5vw, 2.2rem);
   }
   .hero-shade {
     background:
@@ -4571,6 +4578,7 @@ button:disabled {
     object-position: 60% 10%;
   }
   .hero-overview {
+    margin-bottom: 14px;
     font-size: 0.9375rem;
     -webkit-line-clamp: 2;
   }
@@ -4743,6 +4751,10 @@ button:disabled {
   .footer-inner {
     padding-bottom: 30px;
   }
+  /* The tab bar right below already has these links. */
+  .footer-nav {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4792,13 +4804,23 @@ button:disabled {
   .dl-tabs {
     width: 100%;
   }
-  .dl-tabs .tab {
-    flex: 1;
-    justify-content: center;
-    padding-inline: 10px;
+  /* Four tabs at 360 px: icon above one short word, equal widths. */
+  .dl-tabs {
+    border-radius: 18px;
   }
-  .dl-tabs .tab svg {
-    display: none;
+  .dl-tabs .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 7px 4px 6px;
+    border-radius: 14px;
+    font-size: 0.75rem;
+    line-height: 1.2;
+  }
+  .tab-word {
+    max-width: 100%;
   }
   .ts-sort {
     margin-left: 0;
