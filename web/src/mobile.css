@@ -454,3 +454,307 @@
     transition: none;
   }
 }
+.sheet-hint {
+  padding: 0 12px 8px;
+  color: var(--dunst);
+  font-size: 0.85rem;
+}
+.sheet-actions {
+  position: sticky;
+  bottom: -12px;
+  display: flex;
+  gap: 8px;
+  margin: 8px -8px -12px;
+  padding: 12px 12px 14px;
+  background: var(--saal);
+  border-top: 1px solid var(--linie);
+}
+.sheet-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.sheet-actions .btn-primary {
+  flex-grow: 2;
+}
+.tf-sheet .tf-rows {
+  padding: 0 4px;
+}
+
+/* ---------------------------------------------------------------- phone header icons
+   Desktop keeps the search field and the sliders pill; the phone gets two 44 px icon buttons. */
+.header-search-btn,
+.settings-ico-phone {
+  display: none;
+}
+.settings-ico-desk {
+  display: inline-flex;
+}
+.header-icon {
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--leinwand);
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 0.16s ease,
+    transform 0.12s var(--ease-out);
+}
+.header-icon:active {
+  background: rgb(255 255 255 / 0.1);
+  transform: scale(0.94);
+}
+.header-icon:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .header-inner {
+    gap: 2px;
+    padding-right: 6px;
+  }
+  .header .logo {
+    margin-right: auto;
+  }
+  .header .search,
+  .settings-ico-desk,
+  .settings-code {
+    display: none;
+  }
+  .header-search-btn {
+    display: inline-grid;
+  }
+  .settings-ico-phone {
+    display: inline-flex;
+  }
+  .settings-btn {
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-color: transparent;
+    background: none;
+    color: var(--leinwand);
+  }
+  .settings-btn.active {
+    color: var(--lampe);
+  }
+
+  /* full screen search: no header, no tab bar, the field owns the top edge */
+  .is-search .header,
+  .is-search .tabbar {
+    display: none;
+  }
+  .is-search .main {
+    padding-top: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- full screen search */
+.msearch {
+  min-height: 100dvh;
+  padding-bottom: 32px;
+}
+.msearch-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-bar);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+  background: rgb(9 12 23 / 0.94);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--linie);
+}
+.msearch-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--staub);
+  -webkit-tap-highlight-color: transparent;
+}
+.msearch-icon:active {
+  background: rgb(255 255 255 / 0.1);
+}
+.msearch-icon:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: -2px;
+}
+.msearch-input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--linie);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.07);
+  color: var(--leinwand);
+  font-size: 1rem;
+}
+.msearch-input::placeholder {
+  color: var(--dunst);
+}
+.msearch-input::-webkit-search-cancel-button {
+  display: none;
+}
+.msearch-input:focus {
+  outline: none;
+  border-color: var(--lampe);
+  background: rgb(255 255 255 / 0.1);
+}
+.msearch-recent {
+  padding: 18px var(--gutter) 0;
+}
+.msearch-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.msearch-recent-head h2 {
+  font: 700 1.05rem var(--display);
+  font-stretch: 88%;
+}
+.msearch-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.msearch-recent-term {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 48px;
+  color: var(--leinwand);
+  text-align: left;
+}
+.msearch-recent-term svg {
+  flex: none;
+  color: var(--dunst);
+}
+.msearch-recent-term span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msearch-results {
+  padding: 16px var(--gutter) 0;
+}
+
+/* ---------------------------------------------------------------- phone settings: one list, sections as pages */
+.msettings {
+  padding: 20px var(--gutter) 40px;
+}
+.msettings-title {
+  font: 700 1.75rem var(--display);
+  font-stretch: 88%;
+  line-height: 1.1;
+}
+.msettings-sub-text {
+  margin-top: 6px;
+  color: var(--dunst);
+  font-size: 0.9rem;
+}
+.mlist {
+  margin-top: 20px;
+  overflow: hidden;
+  border: 1px solid var(--linie);
+  border-radius: var(--r-l);
+  background: var(--saal);
+}
+.mlist > li + li {
+  border-top: 1px solid var(--linie);
+}
+.mlist-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 14px;
+  color: var(--leinwand);
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.mlist-row:active {
+  background: var(--rang);
+}
+.mlist-row:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: -2px;
+}
+.mlist-row > svg:last-child {
+  flex: none;
+  color: var(--dunst);
+}
+.mlist-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-m);
+  background: rgb(255 255 255 / 0.06);
+  color: var(--lampe-hell);
+}
+.mlist-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.mlist-label {
+  font-weight: 600;
+}
+.mlist-hint {
+  overflow: hidden;
+  color: var(--dunst);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msettings-sub {
+  padding-top: 0;
+}
+.mpage-bar {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 calc(-1 * var(--gutter)) 16px;
+  padding: 8px 8px;
+  background: rgb(9 12 23 / 0.94);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--linie);
+}
+.mpage-back {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--leinwand);
+}
+.mpage-back:active {
+  background: rgb(255 255 255 / 0.1);
+}
+.mpage-title {
+  min-width: 0;
+  overflow: hidden;
+  font: 700 1.15rem var(--display);
+  font-stretch: 88%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
