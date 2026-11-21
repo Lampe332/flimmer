@@ -1,0 +1,456 @@
+/* Phone parts: the touch player and the bottom sheet. Loaded after styles.css. */
+/* ---------------------------------------------------------------- touch player (phones, fingers)
+   Sizes after the phone player of Seanime Mobile: 44 px buttons, 64/76 px play, 52/60 px seek,
+   bars fade with opacity only. The picture is one big tap target under the chrome. */
+.vp.is-touch .vp-overlay,
+.vp.is-touch .vp-resume,
+.vp.is-touch .vp-upnext,
+.vp.is-touch .vp-help {
+  z-index: 3;
+}
+.vt {
+  --vt-btn: 44px;
+  --vt-play: 64px;
+  --vt-seek: 52px;
+  --vt-gap: 28px;
+  --vt-pad: 8px;
+  position: absolute;
+  inset: 0;
+  font-family: var(--body);
+  -webkit-tap-highlight-color: transparent;
+}
+.vt-surface {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgb(0 0 0 / 0);
+  transition: background-color 0.24s ease;
+  touch-action: manipulation;
+}
+.vt.is-shown .vt-surface {
+  background: rgb(0 0 0 / 0.38);
+}
+.vt-top,
+.vt-mid,
+.vt-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.24s ease;
+}
+.vt.is-shown .vt-top,
+.vt.is-shown .vt-mid,
+.vt.is-shown .vt-bottom {
+  opacity: 1;
+}
+.vt.is-shown .vt-top > *,
+.vt.is-shown .vt-mid > *,
+.vt.is-shown .vt-bottom > .vt-bar,
+.vt.is-shown .vt-row > * {
+  pointer-events: auto;
+}
+.vt.is-shown .vt-top > .vt-title,
+.vt.is-shown .vt-mid > .is-spacer,
+.vt.is-shown .vt-row > .vt-spacer {
+  pointer-events: none;
+}
+
+.vt-top {
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: max(var(--vt-pad), env(safe-area-inset-top)) max(var(--vt-pad), env(safe-area-inset-right)) 28px
+    max(var(--vt-pad), env(safe-area-inset-left));
+  background: linear-gradient(rgb(0 0 0 / 0.6), rgb(0 0 0 / 0));
+}
+.vt-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+}
+.vt-title-main,
+.vt-title-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.vt-title-main {
+  font: 700 0.95rem/1.25 var(--display);
+  font-stretch: 84%;
+}
+.vt-title-sub {
+  color: rgb(255 255 255 / 0.72);
+  font-size: 0.78rem;
+}
+.vt-btn {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--vt-btn);
+  height: var(--vt-btn);
+  border-radius: 50%;
+  color: #fff;
+  transition: background-color 0.16s ease, transform 0.16s var(--ease-out);
+}
+.vt-btn:active {
+  background: rgb(255 255 255 / 0.16);
+  transform: scale(0.92);
+}
+.vt-btn:focus-visible,
+.vt-seek:focus-visible,
+.vt-play:focus-visible,
+.vt-time:focus-visible,
+.vt-bar:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: 2px;
+}
+
+.vt-mid {
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vt-gap);
+  transform: translateY(-50%);
+}
+.vt-seek {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--vt-seek);
+  height: var(--vt-seek);
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.32);
+  color: #fff;
+  transition: transform 0.16s var(--ease-out);
+}
+.vt-seek > span {
+  position: absolute;
+  bottom: -18px;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 0.7);
+}
+.vt-play {
+  display: grid;
+  place-items: center;
+  width: var(--vt-play);
+  height: var(--vt-play);
+  border-radius: 50%;
+  background: var(--lampe);
+  color: var(--lampe-tinte);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.35);
+  transition: transform 0.16s var(--ease-out);
+}
+.vt-play.is-spacer {
+  background: none;
+  box-shadow: none;
+}
+.vt-play:active,
+.vt-seek:active {
+  transform: scale(0.92);
+}
+
+.vt-bottom {
+  bottom: 0;
+  padding: 32px max(var(--vt-pad), env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom))
+    max(var(--vt-pad), env(safe-area-inset-left));
+  background: linear-gradient(rgb(0 0 0 / 0), rgb(0 0 0 / 0.65));
+}
+.vt-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vt-time {
+  min-height: var(--vt-btn);
+  padding: 0 8px;
+  border-radius: var(--r-s);
+  color: #fff;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.vt-time-total {
+  color: rgb(255 255 255 / 0.6);
+}
+.vt-status {
+  overflow: hidden;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: rgb(255 255 255 / 0.7);
+  font-size: 0.72rem;
+}
+.vt-spacer {
+  flex: 1;
+}
+/* a 36 px touch strip around a thin track */
+.vt-bar {
+  position: relative;
+  height: 36px;
+  margin: -4px 14px 0;
+  touch-action: none;
+}
+.vt-track {
+  position: absolute;
+  inset: 16px 0 auto;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.24);
+  transition: transform 0.16s var(--ease-out);
+}
+.vt-track > span {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+.vt-ahead {
+  background: var(--kuehl);
+  opacity: 0.55;
+}
+.vt-buffered {
+  background: rgb(255 255 255 / 0.42);
+}
+.vt-played {
+  left: 0;
+  width: 100%;
+  background: var(--lampe);
+  transform-origin: left;
+}
+.vt-thumb {
+  position: absolute;
+  top: 18px;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: var(--lampe);
+  pointer-events: none;
+  transition: transform 0.16s var(--ease-out);
+}
+.vt-bar.is-scrubbing .vt-track {
+  transform: scaleY(1.6);
+}
+.vt-bar.is-scrubbing .vt-thumb {
+  transform: scale(1.5);
+  box-shadow: 0 0 0 6px rgb(var(--lampe-rgb) / 0.25);
+}
+.vt-tip {
+  position: absolute;
+  bottom: 34px;
+  padding: 4px 10px;
+  border-radius: var(--r-s);
+  background: var(--rang);
+  color: var(--leinwand);
+  font: 600 0.9rem var(--body);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* double tap feedback: a soft half-moon on the tapped side */
+.vt-ripple {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 38%;
+  color: #fff;
+  font: 600 0.9rem var(--body);
+  font-variant-numeric: tabular-nums;
+  background: rgb(255 255 255 / 0.1);
+  pointer-events: none;
+  animation: vt-ripple 0.7s var(--ease-out) forwards;
+}
+.vt-ripple.is-left {
+  left: 0;
+  border-radius: 0 50% 50% 0 / 0 50% 50% 0;
+}
+.vt-ripple.is-right {
+  right: 0;
+  border-radius: 50% 0 0 50% / 50% 0 0 50%;
+}
+@keyframes vt-ripple {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.vt-message {
+  position: absolute;
+  top: 22%;
+  left: 50%;
+  z-index: 2;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.6);
+  font-size: 0.85rem;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+@media (min-width: 560px) {
+  .vt {
+    --vt-play: 76px;
+    --vt-seek: 60px;
+    --vt-gap: 44px;
+    --vt-pad: 14px;
+  }
+}
+/* landscape phone: little height, a smaller middle row */
+@media (max-height: 420px) {
+  .vt {
+    --vt-play: 56px;
+    --vt-seek: 46px;
+  }
+  .vt-top {
+    padding-bottom: 16px;
+  }
+  .vt-bottom {
+    padding-top: 18px;
+  }
+}
+
+/* ---------------------------------------------------------------- bottom sheet */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 10);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.sheet.is-inline {
+  position: absolute;
+  z-index: 5;
+}
+.vt-sheet {
+  color: var(--leinwand);
+}
+.sheet-shade {
+  position: absolute;
+  inset: 0;
+  background: rgb(4 6 14 / 0.55);
+  animation: sheet-fade 0.2s ease;
+}
+.sheet-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 560px;
+  max-height: min(70vh, 560px);
+  margin: 0 auto;
+  border-radius: var(--r-l) var(--r-l) 0 0;
+  background: var(--saal);
+  box-shadow: 0 -1px 0 var(--linie-stark), 0 -12px 40px rgb(0 0 0 / 0.4);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 0.24s var(--ease-out);
+  transition: transform 0.2s var(--ease-out);
+}
+.sheet.is-leaving .sheet-shade {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.sheet.is-leaving .sheet-panel {
+  transform: translateY(100%);
+}
+.sheet-grip {
+  flex: none;
+  padding: 8px 20px 10px;
+  touch-action: none;
+  cursor: grab;
+}
+.sheet-handle {
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: var(--linie-stark);
+}
+.sheet-title {
+  font: 700 1.05rem var(--display);
+  font-stretch: 88%;
+}
+.sheet-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 8px 12px;
+}
+.sheet-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 12px;
+  border-radius: var(--r-m);
+  color: var(--leinwand);
+  font-size: 0.95rem;
+  text-align: left;
+}
+.sheet-option:active {
+  background: var(--rang);
+}
+.sheet-option:focus-visible {
+  outline: 2px solid var(--lampe);
+  outline-offset: -2px;
+}
+.sheet-option-label {
+  flex: 1;
+  min-width: 0;
+}
+.sheet-option-hint {
+  color: var(--dunst);
+  font-size: 0.8rem;
+}
+.sheet-option-check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--linie-stark);
+}
+.sheet-option[aria-checked="true"] {
+  color: var(--lampe-hell);
+}
+.sheet-option[aria-checked="true"] .sheet-option-check {
+  box-shadow: inset 0 0 0 6px var(--lampe);
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-panel,
+  .sheet-shade,
+  .vt-ripple {
+    animation-duration: 0.01ms;
+  }
+  .sheet-panel {
+    transition: none;
+  }
+}

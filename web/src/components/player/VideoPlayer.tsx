@@ -18,7 +18,7 @@ import { playUrl, subtitleUrl, torrentApi, type AudioInfo, type SubtitleInfo } f
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
 import { PLAYER_KEYS } from '../../lib/keys'
 import { getPrefs, matchesLang, usePrefs } from '../../lib/prefs'
-import { useCoarse } from '../../lib/platform'
+import { useCoarse, useIsPhone } from '../../lib/platform'
 import Icon, { type IconName } from '../Icon'
 import { Flicker } from '../States'
 import TouchControls, { TOUCH_HIDE_MS } from './TouchControls'
@@ -181,7 +181,10 @@ export default function VideoPlayer({
   const [help, setHelp] = useState(false)
   const narrow = useNarrow()
   /** A finger is the pointer: TouchControls replace the bars (desktop with a mouse keeps its own). */
-  const coarse = useCoarse()
+  // the phone layout gets them too, so a narrow window behaves like the phone
+  const fingerPointer = useCoarse()
+  const phoneLayout = useIsPhone()
+  const coarse = fingerPointer || phoneLayout
   const coarseRef = useRef(coarse)
   coarseRef.current = coarse
 
@@ -569,11 +572,8 @@ export default function VideoPlayer({
     let last = 0
     let at = ''
     const onMove = (e: Event) => {
-      // touch: TouchControls decide (a tap on the picture hides the bars, it must not show them first)
-      const viaTouch =
-        (e instanceof PointerEvent && e.pointerType === 'touch') ||
-        !!(e as Event & { sourceCapabilities?: { firesTouchEvents?: boolean } }).sourceCapabilities?.firesTouchEvents
-      if (viaTouch && coarseRef.current) return
+      // touch controls decide themselves (a tap on the picture hides the bars, it must not show them first)
+      if (coarseRef.current) return
       const inside = !!document.fullscreenElement || (e.target instanceof Node && !!wrap.current?.contains(e.target))
       if (!inside) return
       // Chromium sends synthetic moves at the same spot when the content under a resting cursor changes
@@ -643,8 +643,17 @@ export default function VideoPlayer({
     [],
   )
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
-    else void wrap.current?.requestFullscreen?.().catch(() => undefined)
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined)
+      if (coarseRef.current) screen.orientation?.unlock?.()
+    } else
+      void wrap.current
+        ?.requestFullscreen?.()
+        // phone browsers turn to landscape (the Android app does this itself in MainActivity)
+        .then(() => {
+          if (coarseRef.current) return (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape')
+        })
+        .catch(() => undefined)
   }, [])
 
   const pickSub = useCallback((id: number) => {
