@@ -3,6 +3,7 @@ name = "flimmer-android"
 version = "1.0.0"
 edition = "2024"
 publish = false
+license = "GPL-3.0-only"
 
 # Tauri loads the app as a shared library on Android. On every other target this crate is empty.
 [lib]
