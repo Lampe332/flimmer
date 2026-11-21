@@ -19,3 +19,12 @@ android/gen/android/keystore.properties
 android/gen/schemas/
 # Device screenshots of test runs (TMDB artwork, film stills): kept on disk, not in git
 docs/android-shots/
+
+# local secrets, logs and build leftovers
+.env
+*.pem
+*.key
+*.conf
+*.log
+*.pdb
+*.tsbuildinfo

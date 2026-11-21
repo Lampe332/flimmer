@@ -7,11 +7,11 @@ import { request } from './api'
  * localStorage holds a copy so the first paint already has the right accent and motion.
  */
 export type Accent = 'amber' | 'rose' | 'mint' | 'sky'
-export type StartPage = 'home' | 'continue' | 'watchlist'
+type StartPage = 'home' | 'continue' | 'watchlist'
 /** "off" / "auto" | "ui" (the app language) | a language id. */
-export type TrackLang = string
+type TrackLang = string
 
-export interface Prefs {
+interface Prefs {
   lang: Lang | null
   accent: Accent
   reduceMotion: boolean
@@ -72,7 +72,7 @@ export const START_PAGES: { id: StartPage; path: string }[] = [
 ]
 export const COUNTDOWNS = [5, 8, 10, 15, 20, 30]
 
-export const DEFAULT_PREFS: Prefs = {
+const DEFAULT_PREFS: Prefs = {
   lang: null,
   accent: 'amber',
   reduceMotion: false,
@@ -80,7 +80,8 @@ export const DEFAULT_PREFS: Prefs = {
   autoNext: true,
   autoNextSeconds: 8,
   subLang: 'off',
-  audioLang: 'auto',
+  // The app's language where the source has it ("Deutsch" for a German UI), else the source's own pick.
+  audioLang: 'ui',
   volume: 1,
   rememberVolume: true,
   autoFullscreen: false,
@@ -99,7 +100,7 @@ const trackLang = (v: unknown, base: string, d: string) =>
   typeof v === 'string' && (v === base || v === 'ui' || LANG_IDS.has(v)) ? v : d
 
 /** Unknown or broken values fall back to the default, field by field. */
-export function cleanPrefs(raw: unknown): Prefs {
+function cleanPrefs(raw: unknown): Prefs {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const d = DEFAULT_PREFS
   const num = (v: unknown, min: number, max: number, def: number) =>
@@ -141,7 +142,6 @@ function writeLocal(p: Prefs) {
 }
 
 let current: Prefs = readLocal()
-let loaded = false
 const listeners = new Set<() => void>()
 
 /** Accent and motion live on <html>, so plain CSS follows them. */
@@ -159,11 +159,6 @@ function emit() {
 
 export function getPrefs(): Prefs {
   return current
-}
-
-/** Server copy has arrived (the start page waits for it). */
-export function prefsLoaded(): boolean {
-  return loaded
 }
 
 let saveTimer: number | undefined
@@ -195,7 +190,6 @@ export async function loadPrefs(): Promise<Prefs> {
   } catch {
     /* server unreachable: the local copy stays */
   }
-  loaded = true
   writeLocal(current)
   apply(current)
   if (current.lang && current.lang !== getLang()) setLang(current.lang)

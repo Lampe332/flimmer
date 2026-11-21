@@ -18,10 +18,10 @@ use std::{
 };
 
 use flimmer::sniff::{Candidate, CandidateKind, SniffFuture, Sniffer};
-use tauri::{AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use webview2_com::{
-    AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler,
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler, ClearBrowsingDataCompletedHandler,
     DownloadStartingEventHandler, Microsoft::Web::WebView2::Win32::*, NavigationCompletedEventHandler,
     NavigationStartingEventHandler,
     NewWindowRequestedEventHandler, PermissionRequestedEventHandler, WebResourceRequestedEventHandler,
@@ -136,6 +136,44 @@ impl Sniffer for WebviewSniffer {
             start: self.start.clone(),
         };
         Box::pin(job.run(url, out))
+    }
+
+    fn clear_cache(&self) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> {
+        // One window per profile is enough: the cache belongs to the profile.
+        let mut pending = Vec::new();
+        for label in ["main", "scan-warm"] {
+            let Some(win) = self.app.get_webview_window(label) else { continue };
+            let (tx, rx) = oneshot::channel::<()>();
+            let log = self.log.clone();
+            let asked = win.with_webview(move |pw| {
+                if let Err(e) = clear_disk_cache(&pw.controller(), tx) {
+                    log.line(format_args!("browser cache of {label} not cleared: {e}"));
+                }
+            });
+            if asked.is_ok() {
+                pending.push(rx);
+            }
+        }
+        let log = self.log.clone();
+        Box::pin(async move {
+            for rx in pending {
+                let _ = tokio::time::timeout(Duration::from_secs(15), rx).await;
+            }
+            log.line("browser caches cleared");
+        })
+    }
+}
+
+/// Empties the HTTP cache of the window's profile; `done` fires when the browser has finished.
+fn clear_disk_cache(controller: &ICoreWebView2Controller, done: oneshot::Sender<()>) -> windows::core::Result<()> {
+    // SAFETY: COM calls on the WebView2 thread (inside `with_webview`) on interfaces the controller hands out.
+    unsafe {
+        let profile = controller.CoreWebView2()?.cast::<ICoreWebView2_13>()?.Profile()?.cast::<ICoreWebView2Profile2>()?;
+        let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |_| {
+            let _ = done.send(());
+            Ok(())
+        }));
+        profile.ClearBrowsingData(COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE, &handler)
     }
 }
 

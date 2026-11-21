@@ -1,3 +1,4 @@
+import { useRole } from '../lib/session'
 import { useId, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
@@ -36,6 +37,14 @@ type RowProps = {
   onDownload?: () => void
 }
 
+/** Release name without the advertising prefix many uploads carry ("www.UIndex.org - ", "[ www.site.com ] "). */
+function cleanName(name: string): string {
+  const cleaned = name
+    .replace(/^\s*\[\s*(www[\s.])?[\w-]+([\s.][\w-]+)*[\s.](org|com|net|to|cc|me|info|io|tv|ws|nl)\s*\]\s*[-–]?\s*/i, '')
+    .replace(/^\s*(www[\s.])?[\w-]+[\s.](org|com|net|to|cc|me|info|io|tv|ws|nl)\s+[-–]\s+/i, '')
+  return cleaned.trim() || name
+}
+
 /** One torrent: resolution, size, seeders, then small chips for language, source, HDR, codec; details fold out. */
 export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onDownload }: RowProps) {
   const { t } = useI18n()
@@ -52,11 +61,11 @@ export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onD
         <span className={`fact fact-quality${fit.height ? '' : ' is-miss'}`}>{quality}</span>
         <span className="trow-num">{formatBytes(r.size)}</span>
         {r.seeders_unknown && r.seeders === 0 ? (
-          <span className="trow-num trow-seeds is-low" title={t('td.seedsUnknownTitle')}>
+          <span className="trow-num trow-seeds is-low" title={t('td.sourcesUnknownTitle')}>
             <Icon name="seed" size={13} stroke={2.2} />?
           </span>
         ) : (
-          <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.seedersTitle', { n: r.seeders })}>
+          <span className={`trow-num trow-seeds${r.seeders < 5 ? ' is-low' : ''}`} title={t('tor.sourcesTitle', { n: r.seeders })}>
             <Icon name="seed" size={13} stroke={2.2} />
             {r.seeders.toLocaleString()}
           </span>
@@ -75,7 +84,7 @@ export function TorrentRow({ r, filter, active, best, inList, known, onPlay, onD
         </span>
       </span>
       <span className="trow-name" title={r.name}>
-        {r.name}
+        {cleanName(r.name)}
       </span>
       <span className="trow-chips">
         {chips.map((c) => (
@@ -182,7 +191,7 @@ function TorrentDetails({ id, r, known }: { id: string; r: TorrentResult; known?
   rows.push(
     [t('td.size'), formatBytes(r.size)],
     [
-      t('tf.seeders'),
+      t('tf.sources'),
       r.seeders_unknown && r.seeders === 0
         ? t('td.seedsUnknown')
         : r.sources.length > 1
@@ -281,6 +290,7 @@ export function VpnNotice({ vpn, compact, noLink }: { vpn: Vpn | undefined; comp
   const { t } = useI18n()
   const qc = useQueryClient()
   const release = useMutation({ mutationFn: torrentApi.vpnRelease, onSuccess: () => refreshTorrents(qc) })
+  const device = useRole() === 'device'
   const problem = vpnProblem(vpn)
   if (!problem) return null
   return (
@@ -290,7 +300,7 @@ export function VpnNotice({ vpn, compact, noLink }: { vpn: Vpn | undefined; comp
         <p className="vpn-notice-title">{t(problem.title)}</p>
         <p>{t(problem.text)}</p>
         {vpn?.state === 'blocked' ? (
-          <button type="button" className="btn btn-glass vpn-notice-btn" onClick={() => release.mutate()} disabled={release.isPending}>
+          <button type="button" className="btn btn-glass vpn-notice-btn" onClick={() => release.mutate()} disabled={release.isPending || device}>
             {t('vpn.release')}
           </button>
         ) : (

@@ -9,7 +9,8 @@ import SaveButton from '../components/SaveButton'
 import SeasonTabs from '../components/SeasonTabs'
 import { ErrorState, PageLoader } from '../components/States'
 import { useI18n } from '../i18n'
-import { api, isMediaType, playPath } from '../lib/api'
+import { api, isMediaType, playPath, type MediaType } from '../lib/api'
+import { torrentApi, torrentPlayPath } from '../lib/torrents'
 import { formatRating, formatRuntime, typeLabel } from '../lib/format'
 import { epCode, remaining, resumeTarget, useProgress } from '../lib/progress'
 import { useTitle } from '../lib/title'
@@ -35,6 +36,17 @@ export default function Detail() {
 
   const progress = useProgress(type as 'movie' | 'tv', id, valid)
   useTitle(q.data?.title)
+  // A finished download of this title (or of the episode "continue" points at) plays from the disk, offline.
+  const loaded = q.data
+  const localEp = loaded?.type === 'tv' ? (resumeTarget(progress.data ?? [], loaded.seasons) ?? { s: loaded.seasons[0]?.season_number ?? 1, e: 1 }) : null
+  const local = useQuery({
+    queryKey: ['local-file', type, id, localEp?.s, localEp?.e],
+    queryFn: () => torrentApi.local(type as MediaType, id, localEp?.s, localEp?.e),
+    enabled: valid && !!loaded,
+    retry: false,
+  })
+  const localFile = local.data?.completed ? local.data : undefined
+  const playCls = localFile ? 'btn btn-glass btn-lg' : 'btn btn-primary btn-lg'
 
   if (!valid) return <NotFound />
   if (q.error) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
@@ -90,20 +102,27 @@ export default function Detail() {
           {d.original_title && d.original_title !== d.title && <p className="detail-original">{d.original_title}</p>}
           {d.tagline && <p className="detail-tagline">{d.tagline}</p>}
           <div className="actions">
+            {localFile && (
+              <Link to={torrentPlayPath(localFile.torrent_id, localFile.file)} className="btn btn-primary btn-lg">
+                <Icon name="play" size={18} />
+                {t('detail.playLocal')}
+                {d.type === 'tv' && localEp && <span className="btn-note">{epCode(localEp.s, localEp.e)}</span>}
+              </Link>
+            )}
             {tvResume ? (
-              <Link to={playPath('tv', d.id, tvResume.s, tvResume.e)} className="btn btn-primary btn-lg">
+              <Link to={playPath('tv', d.id, tvResume.s, tvResume.e)} className={playCls}>
                 <Icon name="play" size={18} />
                 {t('home.continue')} {epCode(tvResume.s, tvResume.e)}
                 {tvStarted && <span className="btn-note">{remaining(tvStarted.position, tvStarted.duration)}</span>}
               </Link>
             ) : movieResume ? (
-              <Link to={playPath('movie', d.id)} className="btn btn-primary btn-lg">
+              <Link to={playPath('movie', d.id)} className={playCls}>
                 <Icon name="play" size={18} />
                 {t('home.continue')}
                 <span className="btn-note">{remaining(movieResume.position, movieResume.duration)}</span>
               </Link>
             ) : (
-              <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className="btn btn-primary btn-lg">
+              <Link to={playPath(d.type, d.id, firstSeason ?? 1, 1)} className={playCls}>
                 <Icon name="play" size={18} />
                 {d.type === 'tv' ? t('detail.playFirst') : t('common.play')}
               </Link>

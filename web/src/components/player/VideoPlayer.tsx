@@ -12,7 +12,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, streamUrl, type Variant } from '../../lib/api'
 import { getLang, t as i18nT, useI18n, type Key, type T } from '../../i18n'
-import { formatBitrate, formatClock, formatHeight, langCode, trackLabel } from '../../lib/format'
+import { formatBitrate, formatClock, formatHeight, langCode, trackLabel, uniqueLabels } from '../../lib/format'
 import { variantIndex } from '../../lib/pick'
 import { playUrl, subtitleUrl, torrentApi, type AudioInfo, type SubtitleInfo } from '../../lib/torrents'
 import { getVolume, setVolume, type VolumePref } from '../../lib/storage'
@@ -52,7 +52,7 @@ type Props = {
  * A torrent file as /playinfo describes it. "direct": the file itself, seekable natively. "transcode": ffmpeg fMP4,
  * not seekable; the player reloads `play?t=` on a seek and adds that offset to the element's clock.
  */
-export type TorrentSource = {
+type TorrentSource = {
   id: string
   file: number
   mode: 'direct' | 'transcode'
@@ -308,13 +308,17 @@ export default function VideoPlayer({
     const src = tor.current
     if (src) {
       tState.current = { mode: src.mode, audio: null, h264: false }
-      // A direct file plays its first track; another saved language needs ffmpeg from the start.
+      // The audio language from the settings when the file has it, else the server's pick (the file's default).
+      // A direct file plays its first track; another track needs ffmpeg from the start.
       const first = src.audio[0]?.index ?? -1
-      if (src.mode === 'direct' && src.audio.length > 1 && src.defaultAudio !== first) {
-        tState.current = { mode: 'transcode', audio: src.defaultAudio, h264: false }
+      const wantAudio = getPrefs().audioLang
+      const preferred = wantAudio === 'auto' ? undefined : src.audio.find((a) => matchesLang(a.lang, wantAudio))?.index
+      const startAudio = preferred ?? (src.audio.some((a) => a.index === src.defaultAudio) ? src.defaultAudio : first)
+      if (src.mode === 'direct' && src.audio.length > 1 && startAudio !== first) {
+        tState.current = { mode: 'transcode', audio: startAudio, h264: false }
       }
       setAudios(src.audio.map((a) => ({ id: a.index, lang: a.lang, name: a.title })))
-      setAudio(src.audio.some((a) => a.index === src.defaultAudio) ? src.defaultAudio : first)
+      setAudio(startAudio)
       const texts = src.subtitles.filter((x) => x.text)
       setSubs(texts.map((x) => ({ id: x.index, lang: x.lang, name: x.title })))
       const want = getPrefs().subLang
@@ -411,12 +415,11 @@ export default function VideoPlayer({
       })
       h.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, () => {
         const want = getPrefs().subLang
-        if (!subsChosen && want !== 'off' && h.subtitleTracks.length > 0) {
-          const i = h.subtitleTracks.findIndex((x) => matchesLang(x.lang ?? null, want))
-          if (i >= 0) {
-            h.subtitleDisplay = true
-            h.subtitleTrack = i
-          }
+        if (!subsChosen && h.subtitleTracks.length > 0) {
+          // A playlist may mark a track as default: "Aus" in the settings still means off at the start.
+          const i = want === 'off' ? -1 : h.subtitleTracks.findIndex((x) => matchesLang(x.lang ?? null, want))
+          h.subtitleDisplay = i >= 0
+          h.subtitleTrack = i
           subsChosen = true
         }
         syncSubs()
@@ -914,8 +917,10 @@ export default function VideoPlayer({
         : t('vp.auto')
       : (levels.find((l) => l.id === level)?.label ?? t('vp.auto'))
   const volumeShown = vol.muted ? 0 : vol.volume
-  const subOptions: Option[] = subs.map((s) => ({ id: s.id, label: trackLabel(s, s.id, t('scan.subs')) }))
-  const audioOptions: Option[] = audios.map((a) => ({ id: a.id, label: trackLabel(a, a.id, t('scan.audio')) }))
+  const subLabels = uniqueLabels(subs.map((s, i) => trackLabel(s, i, t('scan.subs'))))
+  const audioLabels = uniqueLabels(audios.map((a, i) => trackLabel(a, i, t('scan.audio'))))
+  const subOptions: Option[] = subs.map((s, i) => ({ id: s.id, label: subLabels[i] ?? '' }))
+  const audioOptions: Option[] = audios.map((a, i) => ({ id: a.id, label: audioLabels[i] ?? '' }))
   const withKey = (label: string, key: string) => t('common.withKey', { label, key })
   const keyName = (keys: string) => (keys.startsWith('vp.') ? t(keys as Key) : keys)
 

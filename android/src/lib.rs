@@ -116,10 +116,12 @@ fn start(app: &tauri::App, bridge: &Bridge, home: &Path, log: &Log) -> Result<St
         home: home.to_path_buf(),
         port,
         sniffer: Some(Arc::new(sniffer::WebviewSniffer::new(bridge.clone(), log.clone()))),
+        dev: false,
     };
     let server = tauri::async_runtime::block_on(flimmer::bind(opts))?;
-    let url = server.url.clone();
-    log.line(format_args!("server at {url}"));
+    log.line(format_args!("server at {}", server.url));
+    // The window starts on a one-time entry link: it sets the PC session cookie, then redirects to `/`.
+    let url = server.entry_url(std::time::Duration::from_secs(120));
     let serve_log = log.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(e) = server.serve(std::future::pending()).await {

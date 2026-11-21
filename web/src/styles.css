@@ -2360,9 +2360,6 @@ button:disabled {
   color: var(--dunst);
   text-decoration: line-through;
 }
-.fact-ms {
-  color: var(--dunst);
-}
 .tag {
   display: inline-flex;
   align-items: center;
@@ -2992,66 +2989,6 @@ button:disabled {
   min-width: 2ch;
   font-variant-numeric: tabular-nums;
 }
-.settings-pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: var(--z-modal);
-  display: grid;
-  gap: 8px;
-  width: min(300px, calc(100vw - 2 * var(--gutter)));
-  max-height: min(74vh, 560px);
-  padding: 14px 14px 12px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border-radius: 14px;
-  background: rgb(16 20 42 / 0.98);
-  box-shadow:
-    0 20px 50px rgb(0 0 0 / 0.6),
-    0 0 0 1px var(--linie-stark);
-  transform-origin: top right;
-  animation: pop 0.16s var(--ease-out);
-}
-.settings-title {
-  margin: 0 0 4px;
-  font: 600 0.9375rem var(--body);
-  color: var(--leinwand);
-}
-.settings-langs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-}
-.settings-lang {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 0 8px 0 6px;
-  border-radius: 8px;
-  color: var(--staub);
-  text-align: left;
-  font-size: 0.875rem;
-  font-weight: 500;
-  transition:
-    background-color 0.14s ease,
-    color 0.14s ease;
-}
-.settings-lang[aria-checked='true'] {
-  background: rgb(255 255 255 / 0.08);
-  color: var(--lampe-hell);
-}
-.settings-lang-check {
-  display: grid;
-}
-@media (hover: hover) {
-  .settings-lang:hover {
-    background: rgb(255 255 255 / 0.1);
-    color: var(--leinwand);
-  }
-}
-
 /* scripts the brand faces do not cover: Latin stays in Bricolage / Instrument Sans, the rest falls back
    to the Windows system face for that script instead of a random one */
 :root:lang(ru) {
@@ -3077,17 +3014,6 @@ button:disabled {
   word-break: normal;
   line-break: strict;
 }
-/* the language list shows every language in its own script */
-.settings-lang:lang(ja) {
-  font-family: 'Yu Gothic UI', 'Meiryo UI', var(--body);
-}
-.settings-lang:lang(zh) {
-  font-family: 'Microsoft YaHei UI', var(--body);
-}
-.settings-lang:lang(ko) {
-  font-family: 'Malgun Gothic', var(--body);
-}
-
 /* shortcut overview inside the player (works in fullscreen too) */
 .vp-help {
   position: absolute;
@@ -3203,6 +3129,9 @@ button:disabled {
 
 .trow {
   display: grid;
+  /* minmax(0, 1fr): long release names must shrink (ellipsis) instead of pushing under the buttons */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   border: 1px solid transparent;
   border-radius: var(--r-m);
   background: rgb(255 255 255 / 0.04);
@@ -3574,13 +3503,6 @@ button:disabled {
 }
 .dl-up svg {
   transform: rotate(180deg);
-}
-.dl-error.is-disk {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--rot);
-  font-weight: 600;
 }
 .dl-resume {
   color: var(--kuehl);
@@ -4229,6 +4151,21 @@ button:disabled {
   color: var(--dunst);
   font-size: 0.8125rem;
 }
+.dl-failed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+.dl-failed .dl-error {
+  color: var(--leinwand);
+  font-size: 0.875rem;
+}
+.dl-failed-actions {
+  display: flex;
+  gap: 8px;
+}
 .dl-actions {
   display: flex;
   align-items: center;
@@ -4473,11 +4410,6 @@ button:disabled {
   outline: none;
   border-color: var(--lampe);
 }
-.set-file {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
 .set-found {
   display: inline-flex;
   align-items: center;
@@ -4528,38 +4460,7 @@ button:disabled {
   margin-left: 8px;
 }
 
-.settings-section {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--linie);
-}
-.settings-vpn {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-.settings-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 8px;
-  border-radius: 8px;
-  color: var(--leinwand);
-  font-size: 0.875rem;
-  font-weight: 500;
-}
-.settings-link svg:last-child {
-  margin-left: auto;
-  color: var(--dunst);
-}
 @media (hover: hover) {
-  .settings-link:hover {
-    background: rgb(255 255 255 / 0.1);
-  }
   .vpn-notice-link:hover {
     text-decoration: underline;
   }
@@ -4905,10 +4806,6 @@ button:disabled {
   .ts-form .btn {
     padding-inline: 16px;
   }
-  .set-file {
-    flex-direction: column;
-    align-items: stretch;
-  }
   .confirm .actions .btn {
     flex: 1 1 auto;
   }
@@ -5004,7 +4901,8 @@ html[data-motion='reduce'] .hero-img {
   grid-template-rows: auto 1fr;
   gap: clamp(20px, 4vh, 40px);
   padding: clamp(16px, 3vw, 32px) 16px 48px;
-  overflow: hidden;
+  /* clip, not hidden: the glow sticks out 10% and a hidden box can still be scrolled, so focusing the step title shifted the whole card left */
+  overflow: clip;
 }
 .ob-glow {
   position: absolute;
@@ -5662,4 +5560,84 @@ html[data-motion='reduce'] .hero-img {
   .pref-range {
     width: 100%;
   }
+}
+
+/* ---------- Handy & Tablet im WLAN: pairing page and settings ---------- */
+.pair .ob-card {
+  width: min(560px, 100%);
+}
+.pair-lang {
+  margin-left: auto;
+}
+.pair-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.pair-form .field {
+  flex: 1 1 200px;
+}
+.pair-pin,
+.lan-pin {
+  font: 700 1.75rem / 1.2 var(--display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.22em;
+}
+.pair-pin {
+  text-align: center;
+}
+.pair-pin::placeholder {
+  color: var(--dunst);
+  opacity: 0.5;
+}
+.lan-url {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--rang);
+  font: 600 0.9375rem ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.lan-pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--rang);
+}
+.lan-qr {
+  flex: none;
+  width: 200px;
+  height: 200px;
+  border-radius: 10px;
+  background: #fff;
+}
+.lan-pairing-text {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 8px;
+  justify-items: start;
+}
+.lan-pin {
+  color: var(--lampe);
+}
+.lan-devices {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+}
+.lan-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.lan-device-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }

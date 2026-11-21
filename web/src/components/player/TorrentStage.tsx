@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '../../i18n'
 import { ApiError } from '../../lib/api'
+import { codeText } from '../../lib/errors'
 import { refreshTorrents, torrentApi, torrentLine, useTorrents, vpnProblem, type PlayInfo, type StartBody } from '../../lib/torrents'
 import Icon from '../Icon'
 import { Flicker } from '../States'
@@ -138,7 +139,7 @@ export default function TorrentStage(p: Props) {
   }
 
   const problem = vpnProblem(vpn)
-  const failed = start.error ?? (tx?.state === 'error' ? new Error(tx.error ?? t('tor.stError')) : null) ?? play.error
+  const failed = start.error ?? (tx?.state === 'error' ? new Error(t('tor.stError')) : null) ?? play.error
   return (
     <>
       {p.backdrop && <img className="stage-backdrop" src={p.backdrop} alt="" />}
@@ -151,7 +152,15 @@ export default function TorrentStage(p: Props) {
               <Icon name="warn" size={26} />
             </span>
             <h2>{t('tor.failedTitle')}</h2>
-            <p>{failed instanceof ApiError && failed.status === 504 ? t('tor.noStartText') : t('tor.failedText')}</p>
+            <p>
+              {failed instanceof ApiError && failed.status === 504
+                ? t('tor.slowStartText')
+                : failed instanceof ApiError && failed.code === 'needs_vpn'
+                  ? codeText(failed.code)
+                  : tx?.state === 'error' && tx.error_code
+                    ? codeText(tx.error_code)
+                    : t('tor.noDataText')}
+            </p>
             {p.fallback && (
               <button type="button" className="btn btn-primary" onClick={p.fallback.run}>
                 <Icon name="refresh" size={16} />

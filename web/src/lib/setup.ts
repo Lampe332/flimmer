@@ -9,10 +9,10 @@ export interface SetupState {
   defaults: { movies_dir: string; series_dir: string }
 }
 
-export interface Maintenance {
+interface Maintenance {
   stream_cache_bytes: number
-  scan_profile_bytes: number
-  scan_profile_pending: boolean
+  /** Both browser profiles (window and source search) on the disk. */
+  webview_bytes: number
   data_dir: string
 }
 
@@ -79,7 +79,7 @@ export const setupApi = {
   importFile: (text: string) =>
     request<{ watchlist: number }>('/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text }),
   maintenance: () => request<Maintenance>('/maintenance'),
-  clearCache: () => request<{ stream_cache_bytes: number; scan_profile_pending: boolean }>('/maintenance/cache', { method: 'DELETE' }),
+  clearCache: () => request<{ stream_cache_bytes: number; webview_bytes: number }>('/maintenance/cache', { method: 'DELETE' }),
 }
 
 export function useSetup() {

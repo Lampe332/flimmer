@@ -30,8 +30,6 @@ const PREFS_KEY: &str = "prefs";
 const PREFS_MAX: usize = 16 * 1024;
 /// A WireGuard file is a few hundred bytes.
 const VPN_MAX: usize = 8 * 1024;
-/// Marker the desktop app looks for on start: delete the source-search browser profile, then this file.
-pub const CLEAR_SCAN_PROFILE: &str = "clear-scan-profile";
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
@@ -264,6 +262,10 @@ async fn prefs_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
 }
 
 const EXPORT_KIND: &str = "flimmer-settings";
+/// The newest export format this build reads.
+const EXPORT_VERSION: u64 = 1;
+/// More titles than anyone keeps for later; a file with more is not an export.
+const IMPORT_WATCHLIST_MAX: usize = 5000;
 
 /// Everything "Exportieren" writes: preferences, source and torrent settings (folders, upload; not the VPN
 /// file) and the watchlist. Never the TMDB token or VPN keys.
@@ -273,7 +275,7 @@ fn export_value(st: &Arc<AppState>) -> ApiResult<Value> {
     let tor = torrent::load_settings(st)?;
     Ok(json!({
         "kind": EXPORT_KIND,
-        "version": 1,
+        "version": EXPORT_VERSION,
         "app_version": env!("CARGO_PKG_VERSION"),
         "prefs": prefs.unwrap_or_else(|| json!({})),
         "sources": scan,
@@ -312,6 +314,22 @@ async fn import(State(st): St, body: Bytes) -> ApiResult<Json<Value>> {
     if v.get("kind").and_then(Value::as_str) != Some(EXPORT_KIND) {
         return Err(ApiError::bad_request("this is not a Flimmer export"));
     }
+    if !v.get("version").and_then(Value::as_u64).is_some_and(|n| (1..=EXPORT_VERSION).contains(&n)) {
+        return Err(ApiError::bad_request("this export comes from a newer Flimmer"));
+    }
+    // Check the whole file before anything is applied: a damaged file changes nothing.
+    let shape_ok = ["prefs", "sources", "torrents"].iter().all(|k| v.get(k).is_none_or(Value::is_object))
+        && v.get("watchlist").is_none_or(|w| w.as_array().is_some_and(|a| a.len() <= IMPORT_WATCHLIST_MAX));
+    if !shape_ok {
+        return Err(ApiError::bad_request("this export file is damaged"));
+    }
+    let mut watchlist = Vec::new();
+    for item in v.get("watchlist").and_then(Value::as_array).into_iter().flatten() {
+        let mut item: crate::model::Item =
+            serde_json::from_value(item.clone()).map_err(|_| ApiError::bad_request("the watchlist in this file is damaged"))?;
+        item.clean();
+        watchlist.push(item);
+    }
     if let Some(prefs) = v.get("prefs").filter(|p| p.is_object()) {
         prefs_put(State(st.clone()), Bytes::from(prefs.to_string())).await?;
     }
@@ -327,18 +345,15 @@ async fn import(State(st): St, body: Bytes) -> ApiResult<Json<Value>> {
         let body = serde_json::to_vec(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
         torrent::settings_put(State(st.clone()), Bytes::from(body)).await?;
     }
-    let mut added = 0;
-    for item in v.get("watchlist").and_then(Value::as_array).into_iter().flatten() {
-        let item: crate::model::Item =
-            serde_json::from_value(item.clone()).map_err(|_| ApiError::bad_request("the watchlist in this file is damaged"))?;
-        st.db.put(&item)?;
-        added += 1;
+    for item in &watchlist {
+        st.db.put(item)?;
     }
-    Ok(Json(json!({ "watchlist": added })))
+    Ok(Json(json!({ "watchlist": watchlist.len() })))
 }
 
-fn scan_profile() -> std::path::PathBuf {
-    paths::data().join("webview").join("scan")
+/// Where the browser caches lie: the host's own (Android) or the desktop profiles under `data/webview`.
+fn webview_dir() -> std::path::PathBuf {
+    crate::host::get().map_or_else(|| paths::data().join("webview"), |h| h.browser_cache_dir.clone())
 }
 
 /// `GET /api/maintenance`: sizes of what "Cache leeren" removes, and where the data lives.
@@ -346,14 +361,15 @@ async fn maintenance() -> Json<Value> {
     let data = paths::data();
     Json(json!({
         "stream_cache_bytes": paths::dir_size(&data.join("cache")),
-        "scan_profile_bytes": paths::dir_size(&crate::host::get().map_or_else(scan_profile, |h| h.browser_cache_dir.clone())),
-        "scan_profile_pending": data.join(CLEAR_SCAN_PROFILE).is_file(),
+        // Browser profiles: the app's own browser cache on a host that has one (Android), else both desktop
+        // profiles (the window and the source search). What really lies on the disk.
+        "webview_bytes": paths::dir_size(&webview_dir()),
         "data_dir": data.to_string_lossy(),
     }))
 }
 
-/// `DELETE /api/maintenance/cache`: stream cache now (files in use stay), saved scan results and the TMDB cache now,
-/// the source-search browser profile on the next start (WebView2 holds it open while the app runs).
+/// `DELETE /api/maintenance/cache`: stream cache (files in use stay), saved scan results, the TMDB cache and the
+/// browser caches of the app's windows (cookies and stored settings stay).
 async fn cache_clear(State(st): St) -> ApiResult<Json<Value>> {
     let data = paths::data();
     let left = paths::clear_dir(&data.join("cache"));
@@ -365,12 +381,10 @@ async fn cache_clear(State(st): St) -> ApiResult<Json<Value>> {
         // A host with its own browser (Android) clears it at once; nothing holds a profile open there.
         (host.clear_browser)().map_err(ApiError::internal)?;
     }
-    let mut pending = false;
-    if scan_profile().is_dir() {
-        std::fs::write(data.join(CLEAR_SCAN_PROFILE), b"").map_err(|_| ApiError::internal("cannot mark the profile"))?;
-        pending = true;
+    if let Some(sniffer) = &st.sniffer {
+        sniffer.clear_cache().await;
     }
-    Ok(Json(json!({ "stream_cache_bytes": left, "scan_profile_pending": pending })))
+    Ok(Json(json!({ "stream_cache_bytes": left, "webview_bytes": paths::dir_size(&webview_dir()) })))
 }
 
 #[derive(Deserialize)]
@@ -395,6 +409,8 @@ async fn reset(State(st): St, Json(body): Json<ResetBody>) -> ApiResult<StatusCo
     let _ = std::fs::remove_file(paths::vpn_file());
     st.torrents.vpn.down();
     st.tmdb.set_token(String::new());
+    // The phone mode and its paired devices were in the settings table too.
+    st.guard.forget_all();
     Ok(StatusCode::NO_CONTENT)
 }
 

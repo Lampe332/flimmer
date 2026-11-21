@@ -98,6 +98,13 @@ export interface NextFile {
   episode: number | null
 }
 
+export interface LocalFile {
+  torrent_id: string
+  file: number
+  completed: boolean
+  state: TorrentState
+}
+
 export interface TorrentEvent {
   id: number
   at: string
@@ -105,7 +112,8 @@ export interface TorrentEvent {
   torrent_id: string
   name: string
   media: TorrentMedia | null
-  message: string | null
+  /** Reason of a failure (`lib/errors`); the English `message` is for the log only. */
+  code: string | null
 }
 
 export interface AutoRule {
@@ -127,7 +135,7 @@ export interface AutoRule {
 
 export type AutoRuleBody = Omit<AutoRule, 'type' | 'id' | 'created_at' | 'on_watchlist' | 'since'> & { since?: string }
 
-export interface Grab {
+interface Grab {
   key: string
   type: MediaType
   id: number
@@ -148,7 +156,7 @@ export interface Decision {
   episode: number | null
   air_date: string | null
   action: 'grab' | 'none' | 'skip'
-  reason: string | null
+  reason_code: string | null
   found: number
   candidate: { infohash: string; name: string; size: number; seeders: number; height: number | null; source: string | null; languages: string[] } | null
 }
@@ -161,7 +169,7 @@ export interface Vpn {
   handshake_age: number | null
   rx_bytes: number
   tx_bytes: number
-  error: string | null
+  error_code: string | null
   config_found: boolean
   /** How torrents go with the current settings: VPN, the normal network (allowed by the user) or not at all. */
   route: 'vpn' | 'direct' | 'none'
@@ -208,7 +216,8 @@ export interface Torrent {
   peers_known: number
   eta_seconds: number | null
   folder: string
-  error: string | null
+  /** Why the last start failed (`lib/errors`); the state is "error" then until the user tries again. */
+  error_code: string | null
   added_at: string
   files: TorrentFile[]
   /** -100..100; the queue runs streams first, then priority, then age. */
@@ -306,6 +315,9 @@ export const torrentApi = {
   forTitle: (type: MediaType, id: number, s?: number, e?: number, p?: URLSearchParams) =>
     request<TorrentSearch>(withParams(`/torrents/${type}/${id}${type === 'tv' ? `?s=${s ?? 1}&e=${e ?? 1}` : ''}`, p)),
   sources: () => request<SourceInfo[]>('/torrents/sources'),
+  /** A known torrent that holds this movie / episode (404 when none does). */
+  local: (type: MediaType, id: number, s?: number, e?: number) =>
+    request<LocalFile>(`/torrents/local/${type}/${id}${type === 'tv' ? `?s=${s ?? 1}&e=${e ?? 1}` : ''}`),
   priority: (id: string, priority: number) => request<void>(`/torrents/${enc(id)}/priority`, json('PUT', { priority })),
   events: (since: number) => request<{ events: TorrentEvent[]; last: number }>(`/torrents/events?since=${since}`),
   seek: (id: string, file: number, t: number, h264: boolean) =>
@@ -391,7 +403,7 @@ export function formatBytes(n: number): string {
   return `${v.toLocaleString(locale(), { maximumFractionDigits: digits, minimumFractionDigits: digits })} ${UNITS[i]}`
 }
 
-export function formatSpeed(bps: number): string {
+function formatSpeed(bps: number): string {
   return `${formatBytes(bps)}/s`
 }
 
@@ -484,7 +496,7 @@ export function likelyDirect(r: TorrentResult): boolean {
 
 // ---- VPN in plain words ----
 
-export type VpnProblem = { title: Key; text: Key }
+type VpnProblem = { title: Key; text: Key }
 
 /** A friendly explanation for why the tunnel does not work, or null when it is fine. */
 export function vpnProblem(v: Vpn | undefined): VpnProblem | null {
@@ -495,9 +507,9 @@ export function vpnProblem(v: Vpn | undefined): VpnProblem | null {
   if (v.route === 'none') return { title: 'vpn.missingTitle', text: 'direct.needsVpn' }
   if (!v.config_found) return { title: 'vpn.missingTitle', text: 'vpn.missingText' }
   if (v.state === 'blocked') return { title: 'vpn.blockedTitle', text: 'vpn.blockedText' }
-  if (v.state === 'up' || !v.error) return null
-  if (/handshake|unreachable/i.test(v.error)) return { title: 'vpn.handshakeTitle', text: 'vpn.handshakeText' }
-  if (/config/i.test(v.error)) return { title: 'vpn.missingTitle', text: 'vpn.badConfigText' }
+  if (v.state === 'up' || !v.error_code) return null
+  if (v.error_code === 'vpn_handshake') return { title: 'vpn.handshakeTitle', text: 'vpn.handshakeText' }
+  if (v.error_code === 'vpn_config') return { title: 'vpn.missingTitle', text: 'vpn.badConfigText' }
   return { title: 'vpn.errorTitle', text: 'vpn.errorText' }
 }
 
@@ -519,7 +531,7 @@ export function torrentLine(x: Torrent): string {
     case 'vpn_blocked':
       return t('tor.stVpn')
     case 'error':
-      return t('tor.stError')
+      return t('tor.stFailed')
     default:
       return x.peers > 0
         ? t('tor.stLoading', { n: x.peers, speed: formatSpeed(x.down_speed) })

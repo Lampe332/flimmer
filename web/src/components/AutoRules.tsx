@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { useI18n } from '../i18n'
 import { titlePath, type Item } from '../lib/api'
+import { codeText } from '../lib/errors'
 import { formatDate } from '../lib/format'
 import { formatBytes, torrentApi, type AutoRule, type AutoRuleBody, type Decision } from '../lib/torrents'
 import { useWatchlist } from '../lib/watchlist'
@@ -227,11 +228,11 @@ function Preview({ decisions }: { decisions: Decision[] }) {
                   {d.candidate.name}
                 </span>
                 <span className="ar-dec-facts">
-                  {formatBytes(d.candidate.size)} · {t('tor.seedsShort', { n: d.candidate.seeders })} · {t('ar.found', { n: d.found })}
+                  {formatBytes(d.candidate.size)} · {t('tor.sourcesShort', { n: d.candidate.seeders })} · {t('ar.found', { n: d.found })}
                 </span>
               </span>
             ) : (
-              <span className="ar-dec-why">{d.reason ?? t('ar.nothingFits', { n: d.found })}</span>
+              <span className="ar-dec-why">{d.reason_code && d.reason_code !== 'nothing_fits' ? codeText(d.reason_code) : t('ar.nothingFits', { n: d.found })}</span>
             )}
             <span className="tag tag-dim">{d.action === 'grab' ? t('ar.wouldGrab') : d.action === 'skip' ? t('ar.skip') : t('ar.noneFits')}</span>
           </li>

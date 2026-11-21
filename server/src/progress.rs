@@ -54,6 +54,7 @@ fn meta_from(body: &[u8], key: &Key) -> ApiResult<WatchMeta> {
     // The path is authoritative for the title.
     meta.item.kind = key.kind;
     meta.item.id = key.id;
+    meta.clean();
     Ok(meta)
 }
 
@@ -118,6 +119,7 @@ pub async fn put(
     }
     b.meta.item.kind = key.kind;
     b.meta.item.id = key.id;
+    b.meta.clean();
     let position = if b.duration > 0.0 { b.position.min(b.duration) } else { b.position };
     let finished = is_finished(position, b.duration);
     st.db.progress_put(&key, position, b.duration, finished, &b.meta)?;

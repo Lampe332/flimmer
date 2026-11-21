@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { useI18n, type Key, type T } from '../../i18n'
 import type { AudioLang, Filter, MinHeight, Scan, ScanResult, Settings, SortKey } from '../../lib/api'
+import { codeText } from '../../lib/errors'
 import { formatBitrate, formatHeight, formatMs, langCode } from '../../lib/format'
 import { fit, rank } from '../../lib/pick'
 import { usePrefs } from '../../lib/prefs'
@@ -12,7 +13,7 @@ import { FilterBar, FilterEmpty } from '../TorrentFilters'
 import { TorrentRow, VpnBadge, VpnNotice } from '../Torrents'
 
 /** The torrent group under the provider list. */
-export type TorrentGroup = {
+type TorrentGroup = {
   results: TorrentResult[]
   /** The whole answer (facets, counts) for the filter bar. */
   data: TorrentSearch | undefined
@@ -287,7 +288,9 @@ export default function ScanPanel(p: Props) {
             {failed.map((r) => (
               <li key={r.provider_id} className={`source is-${r.status}`}>
                 <span className="source-name">{r.name}</span>
-                <span className="fact">{r.status === 'no_stream' ? t('scan.nothing') : (r.error ?? t('scan.error'))}</span>
+                <span className="fact">
+                  {r.status === 'no_stream' ? t('scan.nothing') : r.error_code === 'expired' ? t('player.expired') : codeText(r.error_code ?? 'scan_failed')}
+                </span>
               </li>
             ))}
           </ul>

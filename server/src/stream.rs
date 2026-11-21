@@ -20,6 +20,7 @@ use tokio::{io::AsyncWriteExt, task::JoinHandle};
 use url::Url;
 
 use crate::{
+    lock,
     api::AppState,
     db::Table,
     error::{ApiError, ApiResult},
@@ -31,6 +32,10 @@ const CACHE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const CACHE_HEADER: &str = "x-flimmer-cache";
 /// Pause between prefetch downloads so the upstream sees no burst.
 const POLITE_PAUSE: Duration = Duration::from_millis(60);
+/// A playlist is text; anything bigger is not one.
+const PLAYLIST_MAX: usize = 8 * 1024 * 1024;
+/// One cached segment. The cache is read back into memory, so a "segment" may not be a whole film.
+const SEGMENT_MAX: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -72,6 +77,8 @@ enum Upstream {
     Expired,
     Status(u16),
     Net(String),
+    /// Not an address the proxy may fetch (private network, loopback, no http).
+    Blocked,
 }
 
 impl From<Upstream> for ApiError {
@@ -80,16 +87,23 @@ impl From<Upstream> for ApiError {
             Upstream::Expired => ApiError::new(StatusCode::GONE, "expired"),
             Upstream::Status(s) => ApiError::bad_gateway(format!("upstream answered HTTP {s}")),
             Upstream::Net(m) => ApiError::bad_gateway(format!("upstream not reachable: {m}")),
+            Upstream::Blocked => ApiError::forbidden("this address is not allowed"),
         }
     }
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 fn range_header((off, len): ByteRange) -> String {
     format!("bytes={off}-{}", off + len.max(1) - 1)
+}
+
+/// What an upstream may claim to be. Anything a browser would render or run as a page (HTML, SVG, XML, scripts)
+/// is handed on as plain bytes, so a hostile stream host cannot put a page into Flimmer's origin.
+fn safe_type(upstream: &str) -> Option<&str> {
+    let kind = upstream.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    let ok = kind.starts_with("video/")
+        || kind.starts_with("audio/")
+        || matches!(kind.as_str(), "application/octet-stream" | "application/vnd.apple.mpegurl" | "application/x-mpegurl" | "text/vtt" | "application/mp4" | "image/jpeg" | "image/png" | "image/webp");
+    ok.then_some(upstream)
 }
 
 fn content_type(url: &str, upstream: Option<&str>) -> String {
@@ -103,16 +117,13 @@ fn content_type(url: &str, upstream: Option<&str>) -> String {
         "key" => Some("application/octet-stream"),
         _ => None,
     };
-    by_ext.or(upstream.filter(|c| !c.is_empty())).unwrap_or("application/octet-stream").to_string()
+    by_ext.or(upstream.and_then(safe_type)).unwrap_or("application/octet-stream").to_string()
 }
 
 impl Streams {
     pub fn new(cache_dir: PathBuf) -> Result<Self, String> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|e| format!("cannot build HTTP client: {e}"))?;
+        // Public addresses only, on every redirect hop (see `guard`).
+        let http = crate::guard::outbound_client()?;
         Ok(Self { http, cache_dir, prefetch: Mutex::new(HashMap::new()) })
     }
 
@@ -156,6 +167,9 @@ impl Streams {
     }
 
     async fn send(&self, row: &StreamRow, url: &str, range: Option<&str>) -> Result<reqwest::Response, Upstream> {
+        if !Url::parse(url).is_ok_and(|u| crate::guard::outbound_url_ok(&u)) {
+            return Err(Upstream::Blocked);
+        }
         let resp = self.request(&row.headers, url, range).send().await.map_err(|e| Upstream::Net(net_msg(&e)))?;
         match resp.status().as_u16() {
             401 | 403 | 410 => Err(Upstream::Expired),
@@ -169,8 +183,15 @@ impl Streams {
             return Err(Upstream::Status(resp.status().as_u16()));
         }
         let base = resp.url().clone();
-        let body = resp.text().await.map_err(|e| Upstream::Net(net_msg(&e)))?;
-        Ok((base, body))
+        let mut resp = resp;
+        let mut body = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| Upstream::Net(net_msg(&e)))? {
+            if body.len() + chunk.len() > PLAYLIST_MAX {
+                return Err(Upstream::Net("the playlist is too large".into()));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        Ok((base, String::from_utf8_lossy(&body).into_owned()))
     }
 
     /// Downloads `url` into the cache unless it is there already. Returns the file size.
@@ -194,6 +215,11 @@ impl Streams {
         while let Some(chunk) = resp.chunk().await.map_err(|e| Upstream::Net(net_msg(&e)))? {
             file.write_all(&chunk).await.map_err(io)?;
             size += chunk.len() as u64;
+            if size > SEGMENT_MAX {
+                drop(file);
+                let _ = tokio::fs::remove_file(&part).await;
+                return Err(Upstream::Net("the segment is too large".into()));
+            }
         }
         file.flush().await.map_err(io)?;
         drop(file);
@@ -246,8 +272,8 @@ pub async fn master(State(st): St, Path(id): Path<String>, headers: HeaderMap) -
     let row = load(&st, &id)?;
     if row.kind == StreamKind::Mp4 {
         // A plain file has no playlist: `<video src>` follows this to the proxied file.
-        let enc: String = url::form_urlencoded::byte_serialize(row.url.as_bytes()).collect();
-        return Ok(Redirect::temporary(&format!("/api/stream/{id}/r?u={enc}")).into_response());
+        let base = Url::parse(&row.url).map_err(|_| ApiError::not_found("unknown stream"))?;
+        return Ok(Redirect::temporary(&hls::wrap(&id, &base, &row.url)).into_response());
     }
     let url = row.url.clone();
     proxy(&st, &row, &url, &headers).await
@@ -261,8 +287,13 @@ pub async fn resource(
 ) -> ApiResult<Response> {
     let row = load(&st, &id)?;
     let url = q.get("u").ok_or_else(|| ApiError::bad_request("'u' is required"))?;
-    if !matches!(Url::parse(url).map(|u| u.scheme().to_owned()).as_deref(), Ok("http" | "https")) {
-        return Err(ApiError::bad_request("'u' must be an http(s) URL"));
+    // Only what the server itself wrote into this stream's playlists: the signature covers stream id and URL.
+    // So the proxy cannot be pointed at other hosts, and the captured headers go nowhere else.
+    if !q.get("s").is_some_and(|sig| crate::guard::stream_signed(&id, url, sig)) {
+        return Err(ApiError::forbidden("this address does not belong to the stream"));
+    }
+    if !Url::parse(url).is_ok_and(|u| crate::guard::outbound_url_ok(&u)) {
+        return Err(ApiError::forbidden("this address is not allowed"));
     }
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::trim);
     if let Some(resp) = from_cache(&st.streams, &id, url, range).await {
@@ -329,6 +360,9 @@ async fn proxy(st: &AppState, row: &StreamRow, url: &str, req_headers: &HeaderMa
     if status.is_success() && hls::is_playlist(&head) {
         let mut body = first.to_vec();
         while let Some(chunk) = resp.chunk().await.map_err(|e| Upstream::Net(net_msg(&e)))? {
+            if body.len() + chunk.len() > PLAYLIST_MAX {
+                return Err(ApiError::bad_gateway("the playlist is too large"));
+            }
             body.extend_from_slice(&chunk);
         }
         let text = hls::rewrite(&row.id, &base, &String::from_utf8_lossy(&body));

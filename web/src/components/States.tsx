@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { useI18n } from '../i18n'
 import { ApiError } from '../lib/api'
+import { errorText } from '../lib/errors'
 import Icon, { type IconName } from './Icon'
 import { Mark } from './Logo'
 
@@ -10,16 +11,15 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   const { t } = useI18n()
   const status = error instanceof ApiError ? error.status : -1
   let title = t('err.generic')
-  let text = error instanceof Error ? error.message : t('err.unknown')
+  // The server's message is English and for the log; the text comes from its reason code.
+  let text = errorText(error)
   if (status === 0) {
     title = t('err.serverDown')
-    text = t('err.offline')
   } else if (status === 404) {
     title = t('err.notFound')
     text = t('err.notFoundText')
   } else if (status >= 500) {
     title = t('err.tmdbDown')
-    text = t('err.tmdbDownText', { msg: text })
   }
   return (
     <div className="state" role="alert">

@@ -1,8 +1,9 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router'
 import { PrefRow, Segmented, Toggle } from '../components/Controls'
 import Icon, { type IconName } from '../components/Icon'
+import { LanSettings, ThisDevice } from '../components/LanSettings'
 import { OpenPage, TokenField, VpnImport } from '../components/SetupParts'
 import { startTour } from '../components/Tour'
 import { VpnBadge } from '../components/Torrents'
@@ -10,18 +11,22 @@ import { DirectSwitch, QueueFields, SourceList } from '../components/TorrentSett
 import { LANGUAGES, useI18n, type Key } from '../i18n'
 import { ApiError, api, type AudioLang, type MinHeight, type Settings as ScanSettings, type SortKey } from '../lib/api'
 import { ACCENTS, COUNTDOWNS, START_PAGES, loadPrefs, resetLocalPrefs, setPrefs, usePrefs, type Accent } from '../lib/prefs'
-import { fileAccept, readTextFile, setupApi, useSetup, type Page } from '../lib/setup'
 import { useIsPhone } from '../lib/platform'
+import { useSession } from '../lib/session'
+import { fileAccept, readTextFile, setupApi, useSetup, type Page } from '../lib/setup'
 import { formatBytes, refreshTorrents, torrentApi, useTorrents, type TorrentSettings } from '../lib/torrents'
 import MobileSettings, { type MobileSection } from './MobileSettings'
 
-const SECTIONS: { id: string; label: Key; icon: IconName }[] = [
+/** `pc`: only in the desktop window. A paired phone sees the rest plus "Dieses Gerät". */
+const SECTIONS: { id: string; label: Key; icon: IconName; pc?: boolean; device?: boolean }[] = [
   { id: 'allgemein', label: 'pref.general', icon: 'sliders' },
   { id: 'player', label: 'pref.player', icon: 'play' },
   { id: 'quellen', label: 'pref.sources', icon: 'layers' },
-  { id: 'torrents', label: 'pref.torrents', icon: 'download' },
-  { id: 'tmdb', label: 'pref.tmdb', icon: 'film' },
-  { id: 'daten', label: 'pref.data', icon: 'folder' },
+  { id: 'torrents', label: 'pref.torrents', icon: 'download', pc: true },
+  { id: 'geraete', label: 'lan.title', icon: 'app', pc: true },
+  { id: 'geraet', label: 'lan.thisDevice', icon: 'app', device: true },
+  { id: 'tmdb', label: 'pref.tmdb', icon: 'film', pc: true },
+  { id: 'daten', label: 'pref.data', icon: 'folder', pc: true },
   { id: 'info', label: 'pref.about', icon: 'info' },
 ]
 
@@ -39,32 +44,41 @@ function Section({ id, title, icon, children }: { id: string; title: string; ico
   )
 }
 
-/** The same sections as a list of pages on a phone (summary = the line under each entry). */
-const PHONE_SECTIONS: MobileSection[] = [
-  { id: 'allgemein', label: 'pref.general', icon: 'sliders', summary: 'm.sumGeneral', Body: () => <General /> },
-  { id: 'player', label: 'pref.player', icon: 'play', summary: 'm.sumPlayer', Body: () => <Player /> },
-  { id: 'quellen', label: 'pref.sources', icon: 'layers', summary: 'm.sumSources', Body: () => <Sources /> },
-  { id: 'torrents', label: 'pref.torrents', icon: 'download', summary: 'm.sumTorrents', Body: () => <Torrents /> },
-  { id: 'tmdb', label: 'pref.tmdb', icon: 'film', summary: 'm.sumTmdb', Body: () => <Tmdb /> },
-  { id: 'daten', label: 'pref.data', icon: 'folder', summary: 'm.sumData', Body: () => <Data /> },
-  { id: 'info', label: 'pref.about', icon: 'info', summary: 'm.sumAbout', Body: () => <About /> },
-]
+/** The same sections as a list of pages on a phone (summary = the line under each entry); same pc/device split. */
+function phoneSections(device: boolean, name: string | null): MobileSection[] {
+  const all: (MobileSection & { pc?: boolean; device?: boolean })[] = [
+    { id: 'allgemein', label: 'pref.general', icon: 'sliders', summary: 'm.sumGeneral', Body: () => <General device={device} /> },
+    { id: 'player', label: 'pref.player', icon: 'play', summary: 'm.sumPlayer', Body: () => <Player /> },
+    { id: 'quellen', label: 'pref.sources', icon: 'layers', summary: 'm.sumSources', Body: () => <Sources /> },
+    { id: 'torrents', label: 'pref.torrents', icon: 'download', summary: 'm.sumTorrents', Body: () => <Torrents />, pc: true },
+    { id: 'geraet', label: 'lan.thisDevice', icon: 'app', summary: 'lan.thisDeviceText', Body: () => <ThisDevice name={name} />, device: true },
+    { id: 'tmdb', label: 'pref.tmdb', icon: 'film', summary: 'm.sumTmdb', Body: () => <Tmdb />, pc: true },
+    { id: 'daten', label: 'pref.data', icon: 'folder', summary: 'm.sumData', Body: () => <Data />, pc: true },
+    { id: 'info', label: 'pref.about', icon: 'info', summary: 'm.sumAbout', Body: () => <About device={device} /> },
+  ]
+  return all.filter((s) => (device ? !s.pc : !s.device))
+}
 
 export default function Settings() {
   const { t } = useI18n()
   const phone = useIsPhone()
-  if (phone) return <MobileSettings sections={PHONE_SECTIONS} />
+  const session = useSession().data
+  const device = session?.role === 'device'
+  const deviceName = session?.device ?? null
+  const phoneList = useMemo(() => phoneSections(device, deviceName), [device, deviceName])
+  const sections = SECTIONS.filter((s) => (device ? !s.pc : !s.device))
+  if (phone) return <MobileSettings sections={phoneList} />
   return (
     <div className="page prefs">
       <div className="page-head">
         <div>
           <h1 className="page-title">{t('settings.title')}</h1>
-          <p className="page-sub">{t('pref.sub')}</p>
+          <p className="page-sub">{t('pref.subNote')}</p>
         </div>
       </div>
       <div className="prefs-layout">
         <nav className="prefs-nav" aria-label={t('pref.sections')}>
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <button
               key={s.id}
               type="button"
@@ -81,20 +95,31 @@ export default function Settings() {
           </Link>
         </nav>
         <div className="prefs-main">
-          <General />
+          <General device={device} />
           <Player />
           <Sources />
-          <Torrents />
-          <Tmdb />
-          <Data />
-          <About />
+          {device ? (
+            <Section id="geraet" title={t('lan.thisDevice')} icon="app">
+              <ThisDevice name={session?.device ?? null} />
+            </Section>
+          ) : (
+            <>
+              <Torrents />
+              <Section id="geraete" title={t('lan.title')} icon="app">
+                <LanSettings />
+              </Section>
+              <Tmdb />
+              <Data />
+            </>
+          )}
+          <About device={device} />
         </div>
       </div>
     </div>
   )
 }
 
-function General() {
+function General({ device }: { device: boolean }) {
   const { t, lang, setLang } = useI18n()
   const prefs = usePrefs()
   const navigate = useNavigate()
@@ -141,10 +166,12 @@ function General() {
           <Icon name="play" size={15} />
           {t('pref.tour')}
         </button>
-        <Link to="/einrichtung" className="btn btn-glass btn-s">
-          <Icon name="refresh" size={15} />
-          {t('pref.setup')}
-        </Link>
+        {!device && (
+          <Link to="/einrichtung" className="btn btn-glass btn-s">
+            <Icon name="refresh" size={15} />
+            {t('pref.setup')}
+          </Link>
+        )}
         <Link to="/hilfe" className="btn btn-glass btn-s">
           <Icon name="info" size={15} />
           {t('help.title')}
@@ -440,7 +467,7 @@ function Torrents() {
           <div className="set-actions">
             {save.isError && (
               <p className="field-error" role="alert">
-                {save.error instanceof ApiError && /absolute/.test(save.error.message) ? t('ob.folderAbsolute') : t('set.saveFailed')}
+                {save.error instanceof ApiError && save.error.code === 'folder_local' ? t('ob.folderAbsolute') : t('set.saveFailed')}
               </p>
             )}
             {save.isSuccess && !draft && (
@@ -543,9 +570,9 @@ function Data() {
   })
   const clearCache = useMutation({
     mutationFn: setupApi.clearCache,
-    onSuccess: (r) => {
+    onSuccess: () => {
       void sizes.refetch()
-      say(true, r.scan_profile_pending ? t('pref.cacheClearedRestart') : t('pref.cacheCleared'))
+      say(true, t('pref.cacheCleared'))
     },
     onError: () => say(false, t('pref.failed')),
   })
@@ -579,7 +606,7 @@ function Data() {
     onError: () => say(false, t('pref.failed')),
   })
 
-  const cacheBytes = (sizes.data?.stream_cache_bytes ?? 0) + (sizes.data?.scan_profile_bytes ?? 0)
+  const cacheBytes = (sizes.data?.stream_cache_bytes ?? 0) + (sizes.data?.webview_bytes ?? 0)
   return (
     <Section id="daten" title={t('pref.data')} icon="folder">
       <PrefRow label={t('pref.history')} hint={t('pref.historyHint')}>
@@ -596,7 +623,7 @@ function Data() {
         label={t('pref.cache')}
         hint={
           sizes.data
-            ? t('pref.cacheSizes', { stream: formatBytes(sizes.data.stream_cache_bytes), scan: formatBytes(sizes.data.scan_profile_bytes) })
+            ? t('pref.cacheSizesWeb', { stream: formatBytes(sizes.data.stream_cache_bytes), web: formatBytes(sizes.data.webview_bytes) })
             : t('common.loading')
         }
       >
@@ -653,7 +680,7 @@ const LICENSES: { name: string; license: string; page: Page }[] = [
   { name: 'tork', license: 'MIT', page: 'tork' },
 ]
 
-function About() {
+function About({ device }: { device: boolean }) {
   const { t } = useI18n()
   const setup = useSetup()
   return (
@@ -662,7 +689,7 @@ function About() {
         Flimmer <strong>{setup.data?.version ?? '…'}</strong>
       </p>
       <p className="field-hint">{t('pref.tmdbNotice')}</p>
-      <OpenPage page="tmdb" label="themoviedb.org" quiet />
+      {!device && <OpenPage page="tmdb" label="themoviedb.org" quiet />}
       <h3 className="field-label">{t('pref.licenses')}</h3>
       <ul className="pref-licenses">
         {LICENSES.map((l) => (
@@ -670,7 +697,7 @@ function About() {
             <span>
               {l.name} <span className="pref-license">{l.license}</span>
             </span>
-            <OpenPage page={l.page} label={t('pref.source')} quiet />
+            {!device && <OpenPage page={l.page} label={t('pref.source')} quiet />}
           </li>
         ))}
       </ul>

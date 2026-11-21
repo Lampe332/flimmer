@@ -53,6 +53,29 @@ pub fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
+/// Caches of a WebView2 profile: rebuilt by the browser as needed. Cookies, local storage (the UI's settings)
+/// and extension data are elsewhere and stay.
+const WEBVIEW_CACHES: &[&str] = &["Cache", "Code Cache", "GPUCache", "DawnWebGPUCache", "DawnGraphiteCache"];
+
+/// Empties the caches of every profile below `webview_dir` (`main`, `scan`) whose caches hold more than
+/// `limit` bytes. Only while no window uses the profile (the app's start). Returns the bytes freed.
+pub fn trim_webview_caches(webview_dir: &Path, limit: u64) -> u64 {
+    let Ok(profiles) = std::fs::read_dir(webview_dir) else { return 0 };
+    let mut freed = 0;
+    for profile in profiles.flatten() {
+        let base = profile.path().join("EBWebView").join("Default");
+        let dirs: Vec<PathBuf> = WEBVIEW_CACHES.iter().map(|c| base.join(c)).collect();
+        let size: u64 = dirs.iter().map(|d| dir_size(d)).sum();
+        if size > limit {
+            for d in &dirs {
+                let _ = std::fs::remove_dir_all(d);
+            }
+            freed += size - dirs.iter().map(|d| dir_size(d)).sum::<u64>();
+        }
+    }
+    freed
+}
+
 /// Removes everything inside `dir` that is not in use; returns the bytes that are left.
 pub fn clear_dir(dir: &Path) -> u64 {
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -79,5 +102,28 @@ mod tests {
         assert!(dir.is_dir(), "the folder itself stays");
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(dir_size(&dir), 0);
+    }
+
+    #[test]
+    fn trims_only_big_webview_caches_and_keeps_storage() {
+        let dir = std::env::temp_dir().join(format!("flimmer-webview-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (profile, size) in [("scan", 300usize), ("main", 50)] {
+            let base = dir.join(profile).join("EBWebView").join("Default");
+            std::fs::create_dir_all(base.join("Cache").join("Cache_Data")).unwrap();
+            std::fs::create_dir_all(base.join("Local Storage")).unwrap();
+            std::fs::write(base.join("Cache").join("Cache_Data").join("f_0001"), vec![0u8; size]).unwrap();
+            std::fs::create_dir_all(base.join("Code Cache")).unwrap();
+            std::fs::write(base.join("Code Cache").join("js"), vec![0u8; 20]).unwrap();
+            std::fs::write(base.join("Local Storage").join("leveldb"), b"prefs").unwrap();
+        }
+        assert_eq!(trim_webview_caches(&dir, 200), 320);
+        let scan = dir.join("scan").join("EBWebView").join("Default");
+        assert!(!scan.join("Cache").exists() && !scan.join("Code Cache").exists());
+        assert!(scan.join("Local Storage").join("leveldb").is_file(), "storage stays");
+        // Under the limit: untouched.
+        assert!(dir.join("main").join("EBWebView").join("Default").join("Cache").is_dir());
+        assert_eq!(trim_webview_caches(&dir, 200), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -4,7 +4,7 @@ import { api, type HistoryEntry, type MediaType, type Progress, type Season, typ
 
 export type Ep = { s: number; e: number }
 
-export const progressKey = (type: MediaType, id: number) => ['progress', type, id] as const
+const progressKey = (type: MediaType, id: number) => ['progress', type, id] as const
 
 /** Everything that changes when a position is saved or an episode is marked. */
 export function invalidateWatching(qc: QueryClient, type: MediaType, id: number) {

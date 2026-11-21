@@ -129,10 +129,26 @@ pub struct Decision {
     air_date: Option<String>,
     /// "grab" | "none" (nothing fits) | "skip" (see `reason`)
     action: &'static str,
+    /// English, for the log and the API docs.
     reason: Option<String>,
+    /// The reason as a code the UI words itself (see `error::CODES`).
+    reason_code: Option<&'static str>,
     /// Releases found before the rule was applied.
     found: usize,
     candidate: Option<Value>,
+}
+
+fn reason_text(code: &str) -> &'static str {
+    match code {
+        "not_on_watchlist" => "not on the watchlist",
+        "tmdb_down" => "TMDB did not answer",
+        "already_there" => "a torrent with it is already there",
+        "next_run" => "more episodes are due than one run queues; next run",
+        "search_failed" => "the search failed",
+        "nothing_fits" => "no release fits the rule",
+        "dry_run" => "dry run: nothing was queued",
+        _ => "",
+    }
 }
 
 fn rule_key(kind: MediaType, id: u64) -> String {
@@ -224,19 +240,20 @@ async fn run_rules(st: &Arc<AppState>, dry: bool, preview: Option<Rule>) -> Vec<
     };
     for rule in list {
         let name = rule_key(rule.kind, rule.id);
-        let decision = |episode: Option<(u32, u32, String)>, action, reason: Option<String>, found, candidate| Decision {
+        let decision = |episode: Option<(u32, u32, String)>, action, code: Option<&'static str>, found, candidate| Decision {
             rule: name.clone(),
             title: rule.title.clone(),
             season: episode.as_ref().map(|e| e.0),
             episode: episode.as_ref().map(|e| e.1),
             air_date: episode.map(|e| e.2),
             action,
-            reason,
+            reason: code.map(|c| reason_text(c).to_owned()),
+            reason_code: code,
             found,
             candidate,
         };
         if preview.is_none() && !watchlist.contains(&(rule.kind, rule.id)) {
-            decisions.push(decision(None, "skip", Some("not on the watchlist".into()), 0, None));
+            decisions.push(decision(None, "skip", Some("not_on_watchlist"), 0, None));
             continue;
         }
         let targets: Vec<Option<(u32, u32, String)>> = match rule.kind {
@@ -244,7 +261,7 @@ async fn run_rules(st: &Arc<AppState>, dry: bool, preview: Option<Rule>) -> Vec<
             MediaType::Tv => match due_episodes(st, &rule, &today).await {
                 Ok(list) => list.into_iter().map(Some).collect(),
                 Err(_) => {
-                    decisions.push(decision(None, "skip", Some("TMDB did not answer".into()), 0, None));
+                    decisions.push(decision(None, "skip", Some("tmdb_down"), 0, None));
                     continue;
                 }
             },
@@ -257,22 +274,22 @@ async fn run_rules(st: &Arc<AppState>, dry: bool, preview: Option<Rule>) -> Vec<
                 continue;
             }
             if torrent::has_local(&st.torrents, rule.kind.as_str(), rule.id, episode) {
-                decisions.push(decision(target, "skip", Some("a torrent with it is already there".into()), 0, None));
+                decisions.push(decision(target, "skip", Some("already_there"), 0, None));
                 continue;
             }
             if queued >= MAX_PER_RULE {
-                decisions.push(decision(target, "skip", Some("more episodes are due than one run queues; next run".into()), 0, None));
+                decisions.push(decision(target, "skip", Some("next_run"), 0, None));
                 continue;
             }
             let found = match tsearch::search_title(st, &TitleRef { kind: rule.kind, id: rule.id, episode }).await {
                 Ok(f) => f,
                 Err(_) => {
-                    decisions.push(decision(target, "skip", Some("the search failed".into()), 0, None));
+                    decisions.push(decision(target, "skip", Some("search_failed"), 0, None));
                     continue;
                 }
             };
             let Some(best) = pick(&rule, &found.torrents, episode.is_some(), &saved) else {
-                decisions.push(decision(target, "none", Some("no release fits the rule".into()), found.torrents.len(), None));
+                decisions.push(decision(target, "none", Some("nothing_fits"), found.torrents.len(), None));
                 continue;
             };
             let candidate = json!({
@@ -311,11 +328,11 @@ async fn run_rules(st: &Arc<AppState>, dry: bool, preview: Option<Rule>) -> Vec<
                             auto: true,
                         },
                     );
-                    torrent::emit(st, "grabbed", &entry, Some(format!("auto-download rule {name}")));
+                    torrent::emit(st, "grabbed", &entry, Some(format!("auto-download rule {name}")), None);
                 }
                 queued += 1;
             }
-            decisions.push(decision(target, "grab", dry.then(|| "dry run: nothing was queued".to_owned()), found.torrents.len(), Some(candidate)));
+            decisions.push(decision(target, "grab", dry.then_some("dry_run"), found.torrents.len(), Some(candidate)));
         }
     }
     if !dry {

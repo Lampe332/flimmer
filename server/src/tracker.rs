@@ -133,6 +133,8 @@ pub fn tracker_list(given: &[String], public: &[String]) -> Vec<String> {
         .chain(DEFAULT_TRACKERS.iter().copied())
         .chain(public.iter().map(String::as_str))
         .filter(|t| t.starts_with("udp://") || t.starts_with("http://") || t.starts_with("https://"))
+        // A magnet link comes from a search site: its trackers must not point into the home network.
+        .filter(|t| Url::parse(t).is_ok_and(|u| crate::guard::public_host(&u)))
         .filter(|t| !t.contains(crate::vpn::SHIM_HOST) && seen.insert(t.to_ascii_lowercase()))
         .take(MAX_TRACKERS)
         .map(str::to_owned)

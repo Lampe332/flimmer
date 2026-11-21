@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 
 use crate::{
+    lock,
     api::{self, AppState, Source},
     db::{Health, Outcome, Table, now_ms},
     error::{ApiError, ApiResult},
@@ -71,6 +72,9 @@ struct ScanResult {
     stream_id: Option<String>,
     kind: Option<StreamKind>,
     error: Option<String>,
+    /// `scan_skipped` for a provider left out for now; other errors are `scan_failed` to the UI.
+    #[serde(default)]
+    error_code: Option<String>,
 }
 
 impl ScanResult {
@@ -89,6 +93,7 @@ impl ScanResult {
             stream_id: None,
             kind: None,
             error: None,
+            error_code: None,
         }
     }
 }
@@ -171,10 +176,6 @@ impl Scans {
     }
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 /// `2026-11-20T18:04:05Z` from Unix milliseconds.
 pub(crate) fn iso(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
@@ -243,6 +244,7 @@ fn skipped(src: &Source, h: Option<&Health>) -> ScanResult {
     };
     r.status = if is_error { Status::Error } else { Status::NoStream };
     r.error = Some(format!("skipped: {why} in the last {streak} scans (tried again once a day)"));
+    r.error_code = Some("scan_skipped".into());
     r
 }
 
