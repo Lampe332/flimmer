@@ -198,7 +198,8 @@ export default function TouchControls(p: Props) {
       moved: false,
       mode: 'pending',
       from: 0,
-      height: r.height,
+      // upright the box is only ~220 px high: measure swipes against at least half the screen, or they jump 0 -> 100 %
+      height: Math.max(r.height, window.innerHeight * 0.5),
       rate: 1,
     }
     gesture.current = g
