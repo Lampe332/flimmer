@@ -1076,6 +1076,11 @@
 /* sideways: a panel 4 px under the top bar, centred, at most 800 wide; settings and tracks side by side */
 .sheet.vt-menu.is-panel {
   justify-content: flex-start;
+  /* 4 px under the top buttons (the bar's extra 28 px is only the scrim gradient) */
+  padding-top: calc(var(--vt-pt, 8px) + env(safe-area-inset-top) + var(--vt-btn, 44px) + 4px);
+}
+.vt.is-fullscreen .sheet.vt-menu.is-panel,
+.is-fullscreen .sheet.vt-menu.is-panel {
   padding-top: calc(var(--vt-pt, 8px) + var(--vt-btn, 44px) + 4px);
 }
 .sheet.is-inline.vt-menu.is-panel .sheet-panel {
