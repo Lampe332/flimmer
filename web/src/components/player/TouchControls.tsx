@@ -411,6 +411,15 @@ export default function TouchControls(p: Props) {
       )}
 
       <div className="vt-chrome" onPointerDownCapture={dropGesture}>
+        {p.resume && (
+          <span className="vt-resume" role="status">
+            <span className="vt-resume-text">{p.resume.text}</span>
+            <button type="button" className="vt-resume-btn" onClick={p.resume.onRestart}>
+              <Icon name="refresh" size={14} />
+              {p.resume.restart}
+            </button>
+          </span>
+        )}
         <div className="vt-top" onPointerDownCapture={keep}>
           <button type="button" className="vt-btn" onClick={close} aria-label={t('m.back')}>
             <Icon name="left" size={s.icon} />
@@ -482,20 +491,8 @@ export default function TouchControls(p: Props) {
               {remaining ? `-${formatClock(p.duration - shownTime)}` : formatClock(shownTime)}
               <span className="vt-time-total"> / {formatClock(p.duration)}</span>
             </button>
-            {p.resume ? (
-              <span className="vt-resume" role="status">
-                <span className="vt-resume-text">{p.resume.text}</span>
-                <button type="button" className="vt-resume-btn" onClick={p.resume.onRestart}>
-                  <Icon name="refresh" size={14} />
-                  {p.resume.restart}
-                </button>
-              </span>
-            ) : (
-              <>
-                {p.status && <span className="vt-status">{p.status}</span>}
-                <span className="vt-spacer" />
-              </>
-            )}
+            {p.status && <span className="vt-status">{p.status}</span>}
+            <span className="vt-spacer" />
             {p.next && (
               <button type="button" className="vt-next" onClick={p.next.go} aria-label={t('vp.nextLabel', { label: p.next.label })}>
                 <Icon name="next" size={Math.max(16, s.icon - 4)} />

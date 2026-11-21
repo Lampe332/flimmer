@@ -217,13 +217,22 @@
 .vt-spacer {
   flex: 1;
 }
-/* "Resumed at …": in the bottom row between the time and the buttons, never over a control */
+/* "Resumed at …": centred just under the top row, above the middle buttons, never over a control */
 .vt-resume {
+  position: absolute;
+  top: calc(var(--vt-pt) + var(--vt-btn) + env(safe-area-inset-top) + 2px);
+  left: 16px;
+  right: 16px;
   display: flex;
-  flex: 1;
-  min-width: 0;
+  width: fit-content;
+  margin-inline: auto;
   align-items: center;
   justify-content: center;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.55);
+}
+.vt.is-fullscreen .vt-resume {
+  top: calc(var(--vt-pt) + var(--vt-btn) + 2px);
 }
 .vt-resume-text {
   overflow: hidden;

@@ -550,6 +550,8 @@ export default function VideoPlayer({
       // touch: the bars stay while paused, and hide 5 s after the last touch while playing
       if (coarseRef.current && video.current?.paused) return
       idleTimer.current = window.setTimeout(() => {
+        // paused after the timer started: keep the bars (touch)
+        if (coarseRef.current && video.current?.paused) return
         const overBar = HOVER_MQ.matches && !!wrap.current?.querySelector('.vp-controls:hover')
         if (overBar) arm()
         else setIdle(true)
