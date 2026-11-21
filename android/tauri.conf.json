@@ -1,6 +1,6 @@
 {
   "productName": "Flimmer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "local.flimmer.app",
   "build": {
     "beforeBuildCommand": "npm --prefix web run build"

@@ -1,6 +1,6 @@
 {
   "productName": "Flimmer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "local.flimmer.desktop",
   "app": { "windows": [], "security": { "csp": null } },
   "bundle": {
