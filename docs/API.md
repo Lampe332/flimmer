@@ -64,7 +64,12 @@ interface Source { id: string; name: string; no_ads: boolean; url: string }
 The stream sniffer only exists when the server runs inside the Flimmer desktop app (Tauri). Standalone `flimmer.exe` (browser access) has no sniffer: scan endpoints return state `"unavailable"`, but already cached scan results and streams still work.
 
 ```ts
-interface Caps { sniffer: boolean }
+interface Caps {
+  sniffer: boolean
+  external_player: boolean  // files the built-in player cannot play can go to another app (Android app)
+  open_folder: boolean      // POST /api/torrents/:id/open works (false in the Android app)
+  parallel_max: number      // upper limit of Settings.parallel on this host (12; Android app: 4)
+}
 
 interface Variant { width: number | null; height: number | null; bandwidth: number | null; codecs: string | null }
 interface Track { lang: string | null; name: string | null }   // lang = ISO 639 code as given by the playlist ("eng", "ger", "und" …)
@@ -259,6 +264,7 @@ interface TorrentSettings { vpn_config: string; movies_dir: string; series_dir: 
 | DELETE | `/api/torrents/:id?files=1` | `204`; with `files=1` also deletes the torrent's files (and its folders when empty) |
 | GET | `/api/torrents/:id/playinfo?file=<i>` | `PlayInfo` (ffprobe; waits until the file's start is downloaded, `504` after 90 s). `file` defaults to the first selected video |
 | GET | `/api/torrents/:id/play?file=<i>&t=<seconds>&audio=<i>&video=h264` | the playable stream, see below |
+| POST | `/api/torrents/:id/external?file=<i>` | `204`; hands the file's local stream URL to another player app (hosts with `Caps.external_player`, else `501`) |
 | GET | `/api/torrents/:id/file/:index` | raw file with HTTP range support |
 | GET | `/api/torrents/settings` | `TorrentSettings` (defaults: `<root>/data/vpn/proton.conf`, `D:\Flimmer Downloads\Filme`, `D:\Flimmer Downloads\Serien`, 30) |
 | PUT | `/api/torrents/settings` | body `TorrentSettings` → `204` |
@@ -421,3 +427,13 @@ All POST/PUT bodies above must be `application/json`, so another web page cannot
 data in `%LOCALAPPDATA%\local.flimmer.desktop\data` (the folder the uninstaller offers to delete). `--data <dir>`
 overrides it. The desktop app uses the port of its last start, else 43300, else the next free one up to 43399
 (`--port` pins one), and refuses a second start on the same data folder.
+
+## Hosts without ffmpeg (Android app)
+
+Without `tools/ffmpeg` the server reads the codecs from the container headers (MP4 `stsd`/`mvhd`, Matroska codec ids)
+instead of running ffprobe. `PlayInfo` then has no sizes, no subtitles and only the first audio track, and
+`PlayInfo.mode` is `"direct"` (the file plays as it is, also for `t` > 0: the player seeks with range requests) or
+`"external"` (nothing in the app can play it; `POST /api/torrents/:id/external` opens it in another app).
+`GET /api/maintenance` reports the size of the app's browser cache as `scan_profile_bytes` there, and
+`DELETE /api/maintenance/cache` clears that cache and the cookies at once (`scan_profile_pending` stays `false`).
+See `docs/android.md`.

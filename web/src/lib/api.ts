@@ -56,6 +56,12 @@ export interface SeasonDetails {
 
 export interface Caps {
   sniffer: boolean
+  /** Files the built-in player cannot play can be handed to another app (the Android app). */
+  external_player?: boolean
+  /** A file manager can be opened on a download (not on Android). */
+  open_folder?: boolean
+  /** Most provider pages this device loads at once. */
+  parallel_max?: number
 }
 
 export interface Variant {

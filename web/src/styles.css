@@ -1975,7 +1975,9 @@ button:disabled {
 }
 .footer-nav {
   display: flex;
-  gap: 20px;
+  /* Wraps on narrow phones: a row wider than the screen widens the page and pushes the tab bar out of view. */
+  flex-wrap: wrap;
+  gap: 8px 20px;
   font-weight: 500;
 }
 .footer-nav a {
@@ -3830,6 +3832,8 @@ button:disabled {
 }
 .trow-info {
   display: grid;
+  /* One shrinkable column: an auto track grows to the longest release name and widens the page on phones. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
   min-width: 0;
 }

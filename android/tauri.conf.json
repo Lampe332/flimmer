@@ -1,0 +1,14 @@
+{
+  "productName": "Flimmer",
+  "version": "1.0.0",
+  "identifier": "local.flimmer.app",
+  "build": {
+    "beforeBuildCommand": "npm --prefix web run build"
+  },
+  "app": { "windows": [], "security": { "csp": null } },
+  "bundle": {
+    "active": true,
+    "icon": ["icons/icon.png"],
+    "android": { "minSdkVersion": 26 }
+  }
+}

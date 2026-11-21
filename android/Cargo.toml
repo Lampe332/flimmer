@@ -1,0 +1,30 @@
+[package]
+name = "flimmer-android"
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+# Tauri loads the app as a shared library on Android. On every other target this crate is empty.
+[lib]
+name = "flimmer_android"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# Test builds: the WebViews can be inspected over adb (chrome://inspect). Never in a build that is handed out.
+inspect = ["tauri/devtools"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+flimmer = { path = "../server" }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["sync", "time", "rt"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+include_dir = "0.7"
+# Without "single-thread": the engine is shared by the WebViews' network threads.
+adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+jni = "0.21"

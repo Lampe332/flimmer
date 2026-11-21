@@ -405,7 +405,11 @@ async fn probe(st: &Arc<AppState>, e: &Entry, index: usize, path: &str) -> ApiRe
     if let Some(p) = st.torrents.probes.lock().unwrap().get(&key) {
         return Ok(p.clone());
     }
-    let ffprobe = tool(st, "ffprobe.exe").ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "ffprobe is missing (tools/ffmpeg)"))?;
+    let Some(ffprobe) = tool(st, "ffprobe.exe") else {
+        let p = Arc::new(probe_headers(e, index, path).await?);
+        st.torrents.probes.lock().unwrap().insert(key, p.clone());
+        return Ok(p);
+    };
     let run = command(ffprobe)
         .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams"])
         .arg(file_url(st, &e.id, index))
@@ -421,6 +425,54 @@ async fn probe(st: &Arc<AppState>, e: &Entry, index: usize, path: &str) -> ApiRe
     }
     st.torrents.probes.lock().unwrap().insert(key, p.clone());
     Ok(p)
+}
+
+/// Containers the built-in player of a host without ffmpeg opens as they are (measured on Android's WebView,
+/// see docs/android.md).
+const HEADER_DIRECT_EXT: &[&str] = &["mp4", "m4v", "mov", "webm", "mkv"];
+/// Bytes of the file's start and end that [`probe_headers`] looks at.
+const HEADER_BYTES: u64 = 4 * MIB;
+
+/// A host without ffprobe: the codecs come from the container headers (see [`crate::container`]).
+/// Without ffmpeg only the first audio track can play, so only that one is listed.
+async fn probe_headers(e: &Entry, index: usize, path: &str) -> ApiResult<Probe> {
+    let size = e.meta().files.iter().find(|f| f.index == index).map_or(0, |f| f.size);
+    let ext = extension(path);
+    let not_yet = || ApiError::new(StatusCode::GATEWAY_TIMEOUT, "the file's start is not downloaded yet");
+    let read = async {
+        let mut reader = open(e, index, path, size).await?;
+        let mut head = vec![0u8; HEADER_BYTES.min(size) as usize];
+        reader.read_exact(&mut head).await.map_err(|_| not_yet())?;
+        let mut codecs = crate::container::read(&ext, &head, &[]);
+        if codecs.video.is_none() && codecs.audio.is_empty() && size > HEADER_BYTES && !matches!(ext.as_str(), "mkv" | "webm") {
+            let mut tail = vec![0u8; HEADER_BYTES as usize];
+            reader.seek(SeekFrom::Start(size - HEADER_BYTES)).await.map_err(|_| not_yet())?;
+            reader.read_exact(&mut tail).await.map_err(|_| not_yet())?;
+            codecs = crate::container::read(&ext, &head, &tail);
+        }
+        Ok::<_, ApiError>(codecs)
+    };
+    let codecs = tokio::time::timeout(Duration::from_secs(90), read).await.map_err(|_| not_yet())??;
+    if codecs.video.is_none() && codecs.audio.is_empty() {
+        return Err(ApiError::bad_gateway("no playable stream found in the file"));
+    }
+    let copy_video = codecs.video.as_deref().is_some_and(|c| COPY_VIDEO.contains(&c));
+    let audio: Vec<AudioTrack> = codecs
+        .audio
+        .into_iter()
+        .take(1)
+        .map(|codec| AudioTrack { index: 0, codec, channels: 0, lang: None, title: None, default: true })
+        .collect();
+    Ok(Probe {
+        duration: codecs.duration,
+        direct: HEADER_DIRECT_EXT.contains(&ext.as_str()) && copy_video && audio.first().is_none_or(|a| DIRECT_AUDIO.contains(&a.codec.as_str())),
+        copy_video,
+        video_codec: codecs.video,
+        width: None,
+        height: None,
+        audio,
+        subtitles: Vec::new(),
+    })
 }
 
 /// The file to play: `?file=`, else the first selected video.
@@ -539,7 +591,8 @@ pub async fn playinfo(State(st): St, Path(id): Path<String>, Query(q): Params) -
     let next = crate::torrent::next_episode(&m.files, m.media.as_ref().and_then(|x| x.season), index);
     Ok(Json(serde_json::json!({
         "file": index, "name": path, "size": size,
-        "mode": if p.direct { "direct" } else { "transcode" },
+        // "external": this host has no ffmpeg, another app has to play the file (`POST .../external`).
+        "mode": if p.direct { "direct" } else if tool(&st, "ffmpeg.exe").is_some() { "transcode" } else { "external" },
         "url": format!("/api/torrents/{id}/play?file={index}"),
         "duration": p.duration, "video_codec": p.video_codec, "width": p.width, "height": p.height,
         "copy_video": p.copy_video, "audio": p.audio,
@@ -549,6 +602,15 @@ pub async fn playinfo(State(st): St, Path(id): Path<String>, Query(q): Params) -
         "h264_encoder": h264_encoder(&st).await,
         "next_file": next.map(|(season, episode, file)| serde_json::json!({ "file": file, "season": season, "episode": episode })),
     })))
+}
+
+/// `POST /api/torrents/:id/external?file=`: hands the file to another player app (hosts that can, see `/api/caps`).
+pub async fn external(State(st): St, Path(id): Path<String>, Query(q): Params) -> ApiResult<StatusCode> {
+    let host = crate::host::get().ok_or_else(|| ApiError::new(StatusCode::NOT_IMPLEMENTED, "no external player on this system"))?;
+    let e = st.torrents.entry(&id)?;
+    let (index, path, _) = pick_file(&e, &q)?;
+    (host.open)(&file_url(&st, &id, index), Some(content_type(&path))).map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `GET /api/torrents/:id/subtitle?file=&track=&t=`: one subtitle stream of the file as WebVTT.
@@ -698,7 +760,8 @@ pub async fn play(State(st): St, Path(id): Path<String>, Query(q): Params, heade
     let force_h264 = q.get("video").is_some_and(|v| v == "h264") || (no_hevc && p.video_codec.as_deref() == Some("hevc"));
     let wanted = crate::scan::load_settings(&st)?.filter.audio_lang;
     let track = audio.unwrap_or_else(|| default_audio(&p.audio, &wanted));
-    if p.direct && t == 0.0 && track == 0 && !force_h264 {
+    // Without ffmpeg a directly playable file is all there is (the player seeks with range requests).
+    if p.direct && ((t == 0.0 && track == 0 && !force_h264) || tool(&st, "ffmpeg.exe").is_none()) {
         return serve(&st, &e, index, &path, size, &headers).await;
     }
     let ffmpeg = tool(&st, "ffmpeg.exe").ok_or_else(|| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "ffmpeg is missing (tools/ffmpeg)"))?;

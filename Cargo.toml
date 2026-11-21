@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["server", "desktop"]
+members = ["server", "desktop", "android"]
+default-members = ["server", "desktop"]
 exclude = ["spike"]
 
 [profile.release]

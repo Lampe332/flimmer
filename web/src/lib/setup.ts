@@ -87,6 +87,15 @@ export function useSetup() {
 }
 
 /** Reads a small text file the user picked (WireGuard .conf, export .json). */
+/**
+ * The `accept` of a file input. Android's file picker greys out every file whose type it does not know by that
+ * filter (a WireGuard `.conf` is "application/octet-stream" there), so on Android all files can be chosen; the
+ * server checks the content anyway.
+ */
+export function fileAccept(types: string): string | undefined {
+  return /Android/i.test(navigator.userAgent) ? undefined : types
+}
+
 export function readTextFile(file: File, max: number): Promise<string> {
   if (file.size > max) return Promise.reject(new Error('too large'))
   return file.text()

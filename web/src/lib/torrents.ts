@@ -231,7 +231,8 @@ export interface PlayInfo {
   file: number
   name: string
   size: number
-  mode: 'direct' | 'transcode'
+  /** 'external': this device has no converter; only another player app can play the file. */
+  mode: 'direct' | 'transcode' | 'external'
   url: string
   duration: number | null
   video_codec: string | null
@@ -327,6 +328,7 @@ export const torrentApi = {
   files: (id: string, files: number[]) => request<void>(`/torrents/${enc(id)}/files`, json('PUT', { files })),
   remove: (id: string, withFiles: boolean) => request<void>(`/torrents/${enc(id)}${withFiles ? '?files=1' : ''}`, { method: 'DELETE' }),
   open: (id: string) => request<void>(`/torrents/${enc(id)}/open`, { method: 'POST' }),
+  external: (id: string, file: number) => request<void>(`/torrents/${enc(id)}/external?file=${file}`, { method: 'POST' }),
   playinfo: (id: string, file?: number) => request<PlayInfo>(`/torrents/${enc(id)}/playinfo${file === undefined ? '' : `?file=${file}`}`),
   settings: () => request<TorrentSettings>('/torrents/settings'),
   settingsPut: (s: TorrentSettings) => request<void>('/torrents/settings', json('PUT', s)),

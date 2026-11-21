@@ -10,7 +10,7 @@ import { DirectSwitch, QueueFields, SourceList } from '../components/TorrentSett
 import { LANGUAGES, useI18n, type Key } from '../i18n'
 import { ApiError, api, type AudioLang, type MinHeight, type Settings as ScanSettings, type SortKey } from '../lib/api'
 import { ACCENTS, COUNTDOWNS, START_PAGES, loadPrefs, resetLocalPrefs, setPrefs, usePrefs, type Accent } from '../lib/prefs'
-import { readTextFile, setupApi, useSetup, type Page } from '../lib/setup'
+import { fileAccept, readTextFile, setupApi, useSetup, type Page } from '../lib/setup'
 import { formatBytes, refreshTorrents, torrentApi, useTorrents, type TorrentSettings } from '../lib/torrents'
 
 const SECTIONS: { id: string; label: Key; icon: IconName }[] = [
@@ -262,6 +262,8 @@ function Sources() {
   const { t } = useI18n()
   const prefs = usePrefs()
   const scan = useScanSettings()
+  const caps = useQuery({ queryKey: ['caps'], queryFn: api.caps, staleTime: 60_000, retry: false })
+  const parallelMax = caps.data?.parallel_max ?? 12
   const f = scan.data?.filter
   return (
     <Section id="quellen" title={t('pref.sources')} icon="layers">
@@ -303,20 +305,20 @@ function Sources() {
               onChange={(sort) => scan.set({ filter: { ...f, sort } })}
             />
           </PrefRow>
-          <PrefRow label={t('pref.parallel')} hint={t('pref.parallelHint')} htmlFor="pref-parallel">
+          {parallelMax > 4 && <PrefRow label={t('pref.parallel')} hint={t('pref.parallelHint')} htmlFor="pref-parallel">
             <span className="pref-range">
               <input
                 id="pref-parallel"
                 type="range"
                 min={4}
-                max={12}
+                max={parallelMax}
                 step={1}
                 value={scan.data.parallel}
                 onChange={(e) => scan.set({ parallel: Number(e.target.value) })}
               />
               <output htmlFor="pref-parallel">{scan.data.parallel}</output>
             </span>
-          </PrefRow>
+          </PrefRow>}
         </>
       )}
       <Toggle label={t('pref.hideFailed')} hint={t('pref.hideFailedHint')} checked={prefs.hideFailed} onChange={(hideFailed) => setPrefs({ hideFailed })} />
@@ -601,7 +603,7 @@ function Data() {
           <input
             ref={file}
             type="file"
-            accept=".json,application/json"
+            accept={fileAccept('.json,application/json')}
             className="sr-only"
             tabIndex={-1}
             aria-hidden="true"

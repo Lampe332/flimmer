@@ -83,7 +83,28 @@ export default function TorrentStage(p: Props) {
     [qc],
   )
 
+  const external = useMutation({ mutationFn: (file: number) => torrentApi.external(p.hash, file) })
   const status = tx && tx.state !== 'completed' ? torrentLine(tx) : undefined
+  if (play.data?.mode === 'external') {
+    const file = play.data.file
+    return (
+      <>
+        {p.backdrop && <img className="stage-backdrop" src={p.backdrop} alt="" />}
+        <div className="stage-card" role="status">
+          <span className="state-icon is-warn">
+            <Icon name="warn" size={26} />
+          </span>
+          <h2>{t('tor.externalTitle')}</h2>
+          <p>{external.isError ? t('tor.externalNone') : t('tor.externalText')}</p>
+          <button type="button" className="btn btn-primary" disabled={external.isPending} onClick={() => external.mutate(file)}>
+            <Icon name="play" size={16} solid />
+            {t('tor.externalOpen')}
+          </button>
+          {status && <p className="stage-hint">{status}</p>}
+        </div>
+      </>
+    )
+  }
   if (play.data) {
     return (
       <VideoPlayer
@@ -104,7 +125,7 @@ export default function TorrentStage(p: Props) {
         torrent={{
           id: p.hash,
           file: play.data.file,
-          mode: play.data.mode,
+          mode: play.data.mode === 'transcode' ? 'transcode' : 'direct',
           duration: play.data.duration,
           copyVideo: play.data.copy_video,
           audio: play.data.audio,

@@ -12,3 +12,10 @@ spike/lists/
 desktop/extensions/
 desktop/gen/
 tools/
+
+# Android: signing key and its password stay local
+android/keys/
+android/gen/android/keystore.properties
+android/gen/schemas/
+# Device screenshots of test runs (TMDB artwork, film stills): kept on disk, not in git
+docs/android-shots/

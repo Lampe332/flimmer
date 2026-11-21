@@ -141,7 +141,7 @@ impl Scans {
     /// page finishes. More: parked slots are released at once.
     pub fn set_parallel(&self, n: usize) {
         use std::sync::atomic::Ordering;
-        let want = PARALLEL_MAX - n.clamp(PARALLEL_MIN, PARALLEL_MAX);
+        let want = PARALLEL_MAX - n.clamp(PARALLEL_MIN, parallel_max());
         self.want_parked.store(want, Ordering::SeqCst);
         let mut parked = lock(&self.parked);
         parked.truncate(want);
@@ -255,8 +255,21 @@ struct Job {
 type St = State<Arc<AppState>>;
 type Params = Query<HashMap<String, String>>;
 
+/// The most pages this host loads at once (a phone: fewer than the desktop app).
+fn parallel_max() -> usize {
+    crate::host::get().map_or(PARALLEL_MAX, |h| h.max_parallel.clamp(PARALLEL_MIN, PARALLEL_MAX))
+}
+
+/// `GET /api/caps`: what this host can do. `external_player`: files the built-in player cannot play are handed to
+/// another app; `open_folder`: a file manager can be opened on a download; `parallel_max`: see the scan settings.
 pub async fn caps(State(st): St) -> Json<Value> {
-    Json(json!({ "sniffer": st.sniffer.is_some() }))
+    let host = crate::host::get().is_some();
+    Json(json!({
+        "sniffer": st.sniffer.is_some(),
+        "external_player": host,
+        "open_folder": !host,
+        "parallel_max": parallel_max(),
+    }))
 }
 
 /// The running scan, or the last finished one if it is younger than 6 h.
@@ -621,7 +634,7 @@ pub struct Settings {
 }
 
 fn default_parallel() -> u32 {
-    PARALLEL as u32
+    PARALLEL.min(parallel_max()) as u32
 }
 
 impl Default for Settings {
@@ -663,8 +676,8 @@ pub async fn settings_put(State(st): St, body: Bytes) -> ApiResult<StatusCode> {
     if !(1..=120).contains(&s.prefetch_minutes) {
         return Err(ApiError::bad_request("prefetch_minutes must be between 1 and 120"));
     }
-    if !(PARALLEL_MIN as u32..=PARALLEL_MAX as u32).contains(&s.parallel) {
-        return Err(ApiError::bad_request("parallel must be between 4 and 12"));
+    if !(PARALLEL_MIN as u32..=parallel_max() as u32).contains(&s.parallel) {
+        return Err(ApiError::bad_request(format!("parallel must be between 4 and {}", parallel_max())));
     }
     let data = serde_json::to_string(&s).map_err(|_| ApiError::internal("could not encode settings"))?;
     st.db.blob_put(Table::Settings, SETTINGS_KEY, &data)?;

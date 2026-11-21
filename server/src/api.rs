@@ -101,6 +101,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/torrents/{id}/seek", get(play::seek))
         .route("/api/torrents/{id}/open", post(torrent::open_folder))
         .route("/api/torrents/{id}/play", get(play::play))
+        .route("/api/torrents/{id}/external", post(play::external))
         .route("/api/torrents/{id}/playinfo", get(play::playinfo))
         .route("/api/torrents/{id}/file/{index}", get(play::file))
         // `{id}` is "movie" | "tv" here: torrents of one title.

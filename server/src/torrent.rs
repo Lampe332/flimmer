@@ -88,10 +88,13 @@ fn default_min_free_gb() -> u32 {
 
 impl TorrentSettings {
     fn defaults(root: &FsPath) -> Self {
+        let dir = |name: &str, fallback: &str| {
+            crate::host::get().map_or_else(|| fallback.to_owned(), |h| h.media_dir.join(name).to_string_lossy().into_owned())
+        };
         Self {
             vpn_config: root.join("data").join("vpn").join("proton.conf").to_string_lossy().into_owned(),
-            movies_dir: r"D:\Flimmer Downloads\Filme".into(),
-            series_dir: r"D:\Flimmer Downloads\Serien".into(),
+            movies_dir: dir("Filme", r"D:\Flimmer Downloads\Filme"),
+            series_dir: dir("Serien", r"D:\Flimmer Downloads\Serien"),
             upload_kbps: 30,
             max_active: default_max_active(),
             min_free_gb: default_min_free_gb(),

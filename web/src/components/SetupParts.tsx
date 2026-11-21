@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useI18n, type Key } from '../i18n'
-import { SetupError, readTextFile, setupApi, type Page, type TokenError } from '../lib/setup'
+import { SetupError, fileAccept, readTextFile, setupApi, type Page, type TokenError } from '../lib/setup'
 import Icon from './Icon'
 
 /** Opens one of the fixed help pages in the system browser. */
@@ -168,7 +168,7 @@ export function VpnImport({ has, onChange }: { has: boolean; onChange?: () => vo
       <input
         ref={input}
         type="file"
-        accept=".conf,text/plain"
+        accept={fileAccept('.conf,text/plain')}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"

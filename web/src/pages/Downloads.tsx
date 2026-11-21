@@ -239,6 +239,7 @@ type QueueCtl = { pos: number; first: boolean; last: boolean; busy: boolean; up:
 function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: () => void; onPick: () => void; queue?: QueueCtl }) {
   const { t } = useI18n()
   const qc = useQueryClient()
+  const caps = useQuery({ queryKey: ['caps'], queryFn: api.caps, staleTime: 60_000, retry: false })
   const act = useMutation({
     mutationFn: (what: 'pause' | 'resume' | 'open') => (what === 'pause' ? torrentApi.pause(x.id) : what === 'resume' ? torrentApi.resume(x.id) : torrentApi.open(x.id)),
     onSettled: () => refreshTorrents(qc),
@@ -338,7 +339,7 @@ function DownloadCard({ x, onRemove, onPick, queue }: { x: Torrent; onRemove: ()
             <Icon name="layers" size={16} />
           </button>
         )}
-        {x.folder && x.downloaded > 0 && (
+        {x.folder && x.downloaded > 0 && caps.data?.open_folder !== false && (
           <button type="button" className="icon-btn" onClick={() => act.mutate('open')} aria-label={t('dl.openFolder')} title={t('dl.openFolder')}>
             <Icon name="folder" size={16} />
           </button>

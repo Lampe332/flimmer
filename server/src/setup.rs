@@ -77,9 +77,11 @@ fn onboarded(db: &Db) -> bool {
 
 /// Default download folders for a fresh install: `Videos\Flimmer\Filme|Serien` of the current user.
 fn default_download_dirs() -> (String, String) {
-    let base = std::env::var_os("USERPROFILE")
-        .map(|p| FsPath::new(&p).join("Videos").join("Flimmer"))
-        .unwrap_or_else(|| paths::data().join("Downloads"));
+    let base = crate::host::get().map(|h| h.media_dir.clone()).unwrap_or_else(|| {
+        std::env::var_os("USERPROFILE")
+            .map(|p| FsPath::new(&p).join("Videos").join("Flimmer"))
+            .unwrap_or_else(|| paths::data().join("Downloads"))
+    });
     let s = |name: &str| base.join(name).to_string_lossy().into_owned();
     (s("Filme"), s("Serien"))
 }
@@ -217,6 +219,9 @@ async fn open_page(Json(body): Json<OpenBody>) -> ApiResult<StatusCode> {
 }
 
 fn open_url(url: &str) -> std::io::Result<()> {
+    if let Some(host) = crate::host::get() {
+        return (host.open)(url, None).map_err(std::io::Error::other);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -292,10 +297,9 @@ fn export_path(dir: &FsPath) -> std::path::PathBuf {
 /// (A browser download inside the app window would land somewhere the user does not see.)
 async fn export(State(st): St) -> ApiResult<Json<Value>> {
     let value = export_value(&st)?;
-    let dir = std::env::var_os("USERPROFILE")
-        .map(|p| FsPath::new(&p).join("Downloads"))
-        .filter(|d| d.is_dir())
-        .unwrap_or_else(paths::data);
+    let dir = crate::host::get().map(|h| h.media_dir.clone()).filter(|d| d.is_dir()).unwrap_or_else(|| {
+        std::env::var_os("USERPROFILE").map(|p| FsPath::new(&p).join("Downloads")).filter(|d| d.is_dir()).unwrap_or_else(paths::data)
+    });
     let path = export_path(&dir);
     let text = serde_json::to_string_pretty(&value).map_err(|_| ApiError::internal("could not encode the export"))?;
     std::fs::write(&path, text).map_err(|_| ApiError::internal("cannot write the export file"))?;
@@ -342,7 +346,7 @@ async fn maintenance() -> Json<Value> {
     let data = paths::data();
     Json(json!({
         "stream_cache_bytes": paths::dir_size(&data.join("cache")),
-        "scan_profile_bytes": paths::dir_size(&scan_profile()),
+        "scan_profile_bytes": paths::dir_size(&crate::host::get().map_or_else(scan_profile, |h| h.browser_cache_dir.clone())),
         "scan_profile_pending": data.join(CLEAR_SCAN_PROFILE).is_file(),
         "data_dir": data.to_string_lossy(),
     }))
@@ -357,6 +361,10 @@ async fn cache_clear(State(st): St) -> ApiResult<Json<Value>> {
         st.db.blob_prune(table, i64::MAX)?;
     }
     st.tmdb.clear_cache();
+    if let Some(host) = crate::host::get() {
+        // A host with its own browser (Android) clears it at once; nothing holds a profile open there.
+        (host.clear_browser)().map_err(ApiError::internal)?;
+    }
     let mut pending = false;
     if scan_profile().is_dir() {
         std::fs::write(data.join(CLEAR_SCAN_PROFILE), b"").map_err(|_| ApiError::internal("cannot mark the profile"))?;
