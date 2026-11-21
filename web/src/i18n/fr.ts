@@ -911,7 +911,7 @@ export const fr: Dict = {
   'help.gTap': 'Toucher',
   'help.gTapWhat': 'Afficher ou masquer les commandes',
   'help.gDouble': 'Double toucher à gauche ou à droite',
-  'help.gDoubleWhat': 'Reculer ou avancer de 10 s',
+  'help.gDoubleWhat': 'Gauche : reculer de 5 s, droite : avancer de 10 s',
   'help.gScrub': 'Faire glisser la barre de temps',
   'help.gScrubWhat': 'Se déplacer dans la vidéo',
   'help.gSubs': 'Bouton des sous-titres',

@@ -907,7 +907,7 @@ export const zh: Dict = {
   'help.gTap': '轻点',
   'help.gTapWhat': '显示或隐藏控件',
   'help.gDouble': '在左侧或右侧双击',
-  'help.gDoubleWhat': '后退或前进 10 秒',
+  'help.gDoubleWhat': '左侧后退 5 秒，右侧前进 10 秒',
   'help.gScrub': '拖动进度条',
   'help.gScrubWhat': '快进或快退',
   'help.gSubs': '字幕按钮',

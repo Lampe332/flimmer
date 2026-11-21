@@ -914,7 +914,7 @@ export const en: Dict = {
   'help.gTap': 'Tap',
   'help.gTapWhat': 'Show or hide the controls',
   'help.gDouble': 'Double tap left or right',
-  'help.gDoubleWhat': 'Back or forward 10 s',
+  'help.gDoubleWhat': 'Left: back 5 s, right: forward 10 s',
   'help.gScrub': 'Drag the timeline',
   'help.gScrubWhat': 'Seek',
   'help.gSubs': 'Subtitles button',

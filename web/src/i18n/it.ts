@@ -911,7 +911,7 @@ export const it: Dict = {
   'help.gTap': 'Tocca',
   'help.gTapWhat': 'Mostra o nascondi i controlli',
   'help.gDouble': 'Doppio tocco a sinistra o a destra',
-  'help.gDoubleWhat': 'Indietro o avanti di 10 s',
+  'help.gDoubleWhat': 'Sinistra: indietro di 5 s, destra: avanti di 10 s',
   'help.gScrub': 'Trascina la barra del tempo',
   'help.gScrubWhat': 'Spostarsi nel video',
   'help.gSubs': 'Pulsante dei sottotitoli',

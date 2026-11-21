@@ -911,7 +911,7 @@ export const ru: Dict = {
   'help.gTap': 'Касание',
   'help.gTapWhat': 'Показать или скрыть управление',
   'help.gDouble': 'Двойное касание слева или справа',
-  'help.gDoubleWhat': 'Назад или вперёд на 10 с',
+  'help.gDoubleWhat': 'Слева назад на 5 с, справа вперёд на 10 с',
   'help.gScrub': 'Тянуть шкалу времени',
   'help.gScrubWhat': 'Перемотка',
   'help.gSubs': 'Кнопка субтитров',

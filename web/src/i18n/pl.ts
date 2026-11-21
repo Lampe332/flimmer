@@ -911,7 +911,7 @@ export const pl: Dict = {
   'help.gTap': 'Dotknięcie',
   'help.gTapWhat': 'Pokaż lub ukryj sterowanie',
   'help.gDouble': 'Podwójne dotknięcie z lewej lub z prawej',
-  'help.gDoubleWhat': '10 s do tyłu lub do przodu',
+  'help.gDoubleWhat': 'Lewa: 5 s do tyłu, prawa: 10 s do przodu',
   'help.gScrub': 'Przeciągnij oś czasu',
   'help.gScrubWhat': 'Przewijanie',
   'help.gSubs': 'Przycisk napisów',

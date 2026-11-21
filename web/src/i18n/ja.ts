@@ -908,7 +908,7 @@ export const ja: Dict = {
   'help.gTap': 'タップ',
   'help.gTapWhat': 'コントロールの表示と非表示',
   'help.gDouble': '左右をダブルタップ',
-  'help.gDoubleWhat': '10 秒戻る、または進む',
+  'help.gDoubleWhat': '左で5秒戻る、右で10秒進む',
   'help.gScrub': 'シークバーをドラッグ',
   'help.gScrubWhat': '再生位置を移動',
   'help.gSubs': '字幕ボタン',

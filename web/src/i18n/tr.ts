@@ -910,7 +910,7 @@ export const tr: Dict = {
   'help.gTap': 'Dokunma',
   'help.gTapWhat': 'Kontrolleri göster veya gizle',
   'help.gDouble': 'Solda veya sağda çift dokunma',
-  'help.gDoubleWhat': '10 sn geri veya ileri',
+  'help.gDoubleWhat': 'Sol 5 sn geri, sağ 10 sn ileri',
   'help.gScrub': 'Zaman çubuğunu sürükle',
   'help.gScrubWhat': 'İleri veya geri sar',
   'help.gSubs': 'Altyazı düğmesi',

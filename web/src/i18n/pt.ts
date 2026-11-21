@@ -911,7 +911,7 @@ export const pt: Dict = {
   'help.gTap': 'Tocar',
   'help.gTapWhat': 'Mostrar ou ocultar os controles',
   'help.gDouble': 'Toque duplo à esquerda ou à direita',
-  'help.gDoubleWhat': 'Voltar ou avançar 10 s',
+  'help.gDoubleWhat': 'Esquerda: voltar 5 s, direita: avançar 10 s',
   'help.gScrub': 'Arrastar a barra de tempo',
   'help.gScrubWhat': 'Avançar ou voltar',
   'help.gSubs': 'Botão de legendas',

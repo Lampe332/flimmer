@@ -911,7 +911,7 @@ export const es: Dict = {
   'help.gTap': 'Tocar',
   'help.gTapWhat': 'Mostrar u ocultar los controles',
   'help.gDouble': 'Doble toque a la izquierda o a la derecha',
-  'help.gDoubleWhat': 'Retroceder o avanzar 10 s',
+  'help.gDoubleWhat': 'Izquierda: retroceder 5 s, derecha: avanzar 10 s',
   'help.gScrub': 'Arrastrar la barra de tiempo',
   'help.gScrubWhat': 'Avanzar o retroceder',
   'help.gSubs': 'Botón de subtítulos',

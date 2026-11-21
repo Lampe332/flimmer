@@ -912,7 +912,7 @@ export const de = {
   'help.gTap': 'Tippen',
   'help.gTapWhat': 'Steuerung ein oder aus',
   'help.gDouble': 'Doppeltipp links oder rechts',
-  'help.gDoubleWhat': '10 s zurück oder vor',
+  'help.gDoubleWhat': 'Links 5 s zurück, rechts 10 s vor',
   'help.gScrub': 'Zeitstrahl ziehen',
   'help.gScrubWhat': 'Spulen',
   'help.gSubs': 'Untertitel-Knopf',

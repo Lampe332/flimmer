@@ -908,7 +908,7 @@ export const ko: Dict = {
   'help.gTap': '탭',
   'help.gTapWhat': '컨트롤 표시 또는 숨기기',
   'help.gDouble': '왼쪽 또는 오른쪽 두 번 탭',
-  'help.gDoubleWhat': '10초 뒤로 또는 앞으로',
+  'help.gDoubleWhat': '왼쪽 5초 뒤로, 오른쪽 10초 앞으로',
   'help.gScrub': '타임라인 드래그',
   'help.gScrubWhat': '재생 위치 이동',
   'help.gSubs': '자막 버튼',
