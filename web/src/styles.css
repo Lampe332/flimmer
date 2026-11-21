@@ -2254,8 +2254,8 @@ button:disabled {
   line-height: 1.2;
   text-align: center;
   text-wrap: balance;
-  overflow-wrap: anywhere;
-  hyphens: auto;
+  overflow-wrap: break-word;
+  hyphens: manual;
   transition:
     background-color 0.16s ease,
     box-shadow 0.16s ease,
