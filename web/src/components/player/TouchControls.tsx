@@ -504,7 +504,7 @@ export default function TouchControls(p: Props) {
         t={t}
         open={open === 'settings'}
         onClose={() => p.setMenu(null)}
-        panel={size.w > size.h}
+        panel={window.innerWidth > window.innerHeight}
         inline={p.fullscreen}
         media={p.media}
         audio={p.audio}
